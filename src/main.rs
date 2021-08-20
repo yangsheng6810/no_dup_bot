@@ -43,6 +43,19 @@ pub struct MessageInfo {
     link: Option<Url>,
 }
 
+#[derive(Debug, Clone, Hash)]
+pub struct MessageKey {
+    chat_id: String,
+    url: Url
+}
+
+impl PartialEq for MessageKey {
+    fn eq(&self, other: &Self) -> bool {
+        self.chat_id.eq(&other.chat_id) && self.url.eq(&other.url)
+    }
+}
+
+impl Eq for MessageKey {}
 
 fn get_chat_id(message: &UpdateWithCx<AutoSend<Bot>, Message>) -> String {
     let id = message.update.chat_id();
@@ -112,9 +125,10 @@ fn get_text(message: &UpdateWithCx<AutoSend<Bot>, Message>) -> Option<String> {
 }
 
 async fn parse_message(message: &UpdateWithCx<AutoSend<Bot>, Message>,
-                 db: Arc<Mutex<HashMap<Url, MessageInfo>>>) -> Result<(), RequestError> {
+                 db: Arc<Mutex<HashMap<MessageKey, MessageInfo>>>) -> Result<(), RequestError> {
     let url: Option<Url>;
     let link = get_msg_link(&message);
+    let chat_id = get_chat_id(&message);
 
     if is_forward(&message) {
         println!("Found a forwarded message");
@@ -130,8 +144,9 @@ async fn parse_message(message: &UpdateWithCx<AutoSend<Bot>, Message>,
         }
     }
     if let Some(url) = url {
+        let key = MessageKey{chat_id, url:url.clone()};
         let mut db = db.lock().await;
-        if let Some(info) = db.get_mut(&url){
+        if let Some(info) = db.get_mut(&key){
             // has seen this message before
             info.count += 1;
             // message.answer(format!("See it {} times", info.count)).await?;
@@ -151,7 +166,7 @@ async fn parse_message(message: &UpdateWithCx<AutoSend<Bot>, Message>,
             message.reply_to(final_msg).await?;
         } else {
             // has not seen this message before
-            db.insert(url.clone(), MessageInfo{url, count:1, link});
+            db.insert(key.clone(), MessageInfo{url, count:1, link});
         };
     } else {
         if let Some(text) = get_text(&message) {
@@ -191,7 +206,7 @@ fn need_handle(message: &UpdateWithCx<AutoSend<Bot>, Message>) -> bool {
     ret_val
 }
 
-async fn run(db: Arc<Mutex<HashMap<Url, MessageInfo>>>) {
+async fn run(db: Arc<Mutex<HashMap<MessageKey, MessageInfo>>>) {
     teloxide::enable_logging!();
     log::info!("Starting simple_commands_bot...");
 
@@ -212,6 +227,6 @@ async fn run(db: Arc<Mutex<HashMap<Url, MessageInfo>>>) {
 
 #[tokio::main]
 async fn main() {
-    let db = Arc::new(Mutex::new(HashMap::<Url, MessageInfo>::new()));
+    let db = Arc::new(Mutex::new(HashMap::<MessageKey, MessageInfo>::new()));
     run(db.clone()).await;
 }
