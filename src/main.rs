@@ -57,8 +57,8 @@ impl PartialEq for MessageKey {
 
 impl Eq for MessageKey {}
 
-fn get_chat_id(message: &UpdateWithCx<AutoSend<Bot>, Message>) -> String {
-    let id = message.update.chat_id();
+fn get_chat_id(ctx: &UpdateWithCx<AutoSend<Bot>, Message>) -> String {
+    let id = ctx.update.chat_id();
     let id_str = id.to_string();
     match id_str.strip_prefix("-100") {
         Some(id) => String::from(id),
@@ -66,18 +66,18 @@ fn get_chat_id(message: &UpdateWithCx<AutoSend<Bot>, Message>) -> String {
     }
 }
 
-fn get_msg_link(message: &UpdateWithCx<AutoSend<Bot>, Message>) -> Option<Url> {
-    if message.update.chat.is_private() {
+fn get_msg_link(ctx: &UpdateWithCx<AutoSend<Bot>, Message>) -> Option<Url> {
+    if ctx.update.chat.is_private() {
         return None;
     }
-    let id = message.update.id;
-    let url = match message.update.chat.username() {
+    let id = ctx.update.id;
+    let url = match ctx.update.chat.username() {
             // If it's public group (i.e. not DM, not private group), we can produce
             // "normal" t.me link (accesible to everyone).
             Some(username) => format!("https://t.me/{0}/{1}/", username, id),
             // For private groups we produce "private" t.me/c links. These are only
             // accesible to the group members.
-            None => format!("https://t.me/c/{0}/{1}/", get_chat_id(&message), id),
+            None => format!("https://t.me/c/{0}/{1}/", get_chat_id(&ctx), id),
         };
     Some(Url::parse(&url).unwrap())
 }
@@ -105,8 +105,8 @@ fn get_forward_msg_link(message: &UpdateWithCx<AutoSend<Bot>, Message>) -> Optio
     }
 }
 
-fn get_url(message: &UpdateWithCx<AutoSend<Bot>, Message>) -> Option<Url> {
-    if let Some(ss) = message.update.text().to_owned() {
+fn get_url(ctx: &UpdateWithCx<AutoSend<Bot>, Message>) -> Option<Url> {
+    if let Some(ss) = ctx.update.text().to_owned() {
         match Url::parse(ss) {
             Ok(url) => Some(url),
             Err(_) => None
@@ -116,29 +116,29 @@ fn get_url(message: &UpdateWithCx<AutoSend<Bot>, Message>) -> Option<Url> {
     }
 }
 
-fn get_text(message: &UpdateWithCx<AutoSend<Bot>, Message>) -> Option<String> {
-    if let Some(ss) = message.update.text().to_owned() {
+fn get_text(ctx: &UpdateWithCx<AutoSend<Bot>, Message>) -> Option<String> {
+    if let Some(ss) = ctx.update.text().to_owned() {
         Some(String::from(ss))
     } else {
         None
     }
 }
 
-async fn parse_message(message: &UpdateWithCx<AutoSend<Bot>, Message>,
+async fn parse_message(ctx: &UpdateWithCx<AutoSend<Bot>, Message>,
                  db: Arc<Mutex<HashMap<MessageKey, MessageInfo>>>) -> Result<(), RequestError> {
     let url: Option<Url>;
-    let link = get_msg_link(&message);
-    let chat_id = get_chat_id(&message);
+    let link = get_msg_link(&ctx);
+    let chat_id = get_chat_id(&ctx);
 
-    if is_forward(&message) {
+    if is_forward(&ctx) {
         println!("Found a forwarded message");
-        url = get_forward_msg_link(&message);
+        url = get_forward_msg_link(&ctx);
         if url.is_none(){
             println!("Forwarded message link parse failure.")
         }
     } else {
         println!("Found a non-forwarded message");
-        url = get_url(&message);
+        url = get_url(&ctx);
         if url.is_none(){
             println!("Non-forwarded message link parse failure.")
         }
@@ -149,27 +149,27 @@ async fn parse_message(message: &UpdateWithCx<AutoSend<Bot>, Message>,
         if let Some(info) = db.get_mut(&key){
             // has seen this message before
             info.count += 1;
-            // message.answer(format!("See it {} times", info.count)).await?;
+            // ctx.answer(format!("See it {} times", info.count)).await?;
             println!("See it {} times", info.count);
             let link_msg = match &info.link {
                 Some(url) => {
                     format!("第一次出现是在：{}", url)
                 },
                 None => {
-                    // message.answer(format!("Last seen in private chat")).await?;
+                    // ctx.answer(format!("Last seen in private chat")).await?;
                     format!("第一次出现是在private chat")
                 }
             };
-            // message.answer(&link_msg).await?;
+            // ctx.answer(&link_msg).await?;
             let final_msg = format!("你火星了！这条消息是第{}次来到本群了，快去爬楼。{}", info.count, link_msg);
             println!("{}", &final_msg);
-            message.reply_to(final_msg).await?;
+            ctx.reply_to(final_msg).await?;
         } else {
             // has not seen this message before
             db.insert(key.clone(), MessageInfo{url, count:1, link});
         };
     } else {
-        if let Some(text) = get_text(&message) {
+        if let Some(text) = get_text(&ctx) {
             println!("Pong, {}", text);
         }
     }
@@ -177,25 +177,25 @@ async fn parse_message(message: &UpdateWithCx<AutoSend<Bot>, Message>,
 }
 
 
-fn is_forward(message: &UpdateWithCx<AutoSend<Bot>, Message>) -> bool {
-    message.update.forward_from().is_some() || message.update.forward_from_chat().is_some()
+fn is_forward(ctx: &UpdateWithCx<AutoSend<Bot>, Message>) -> bool {
+    ctx.update.forward_from().is_some() || ctx.update.forward_from_chat().is_some()
 }
 
-fn need_handle(message: &UpdateWithCx<AutoSend<Bot>, Message>) -> bool {
-    // dbg!(message.update.chat.is_private());
-    // dbg!(message.update.chat_id());
-    // dbg!(message.update.id);
-    // dbg!(message.update.forward_from());
-    // dbg!(message.update.forward_from_chat());
-    // dbg!(message.update.forward_from_message_id());
-    // dbg!(message.update.forward_date());
-    // dbg!(message.update.forward_signature());
+fn need_handle(ctx: &UpdateWithCx<AutoSend<Bot>, Message>) -> bool {
+    // dbg!(ctx.update.chat.is_private());
+    // dbg!(ctx.update.chat_id());
+    // dbg!(ctx.update.id);
+    // dbg!(ctx.update.forward_from());
+    // dbg!(ctx.update.forward_from_chat());
+    // dbg!(ctx.update.forward_from_message_id());
+    // dbg!(ctx.update.forward_date());
+    // dbg!(ctx.update.forward_signature());
 
     let mut ret_val = false;
-    if is_forward(&message) {
+    if is_forward(&ctx) {
         ret_val = true;
     } else {
-        if let Some(ss) = message.update.text().to_owned() {
+        if let Some(ss) = ctx.update.text().to_owned() {
             // dbg!(ss);
             ret_val = match Url::parse(ss) {
                 Ok(_) => true,
@@ -213,11 +213,11 @@ async fn run(db: Arc<Mutex<HashMap<MessageKey, MessageInfo>>>) {
     let bot = Bot::from_env().auto_send();
 
     let db = db.clone();
-    teloxide::repl(bot, move |message| {
+    teloxide::repl(bot, move |ctx| {
         let db = db.clone();
         async move {
-            if need_handle(&message) {
-                parse_message(&message, db).await?;
+            if need_handle(&ctx) {
+                parse_message(&ctx, db).await?;
             }
             respond(())
         }
