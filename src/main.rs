@@ -7,6 +7,9 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::Mutex;
 use url::Url;
+use serde::{Deserialize, Serialize};
+
+use rocksdb::{DB, Options};
 
 #[derive(BotCommand)]
 #[command(rename = "lowercase", description = "These commands are supported:")]
@@ -38,16 +41,19 @@ async fn answer(
     Ok(())
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MessageInfo {
+    #[serde(with = "url_serde")]
     url: Url,
     count: u32,
+    #[serde(with = "url_serde")]
     link: Option<Url>,
 }
 
-#[derive(Debug, Clone, Hash)]
+#[derive(Debug, Clone, Hash, Serialize, Deserialize)]
 pub struct MessageKey {
     chat_id: String,
+    #[serde(with = "url_serde")]
     url: Url
 }
 
@@ -58,6 +64,60 @@ impl PartialEq for MessageKey {
 }
 
 impl Eq for MessageKey {}
+
+pub trait KVStore {
+    fn init(file_path: &str) -> Self;
+    fn save(&self, k: &MessageKey, v: &MessageInfo) -> bool;
+    fn find(&self, k: &MessageKey) -> Option<MessageInfo>;
+    fn delete(&self, k: &MessageKey) -> bool;
+}
+
+pub struct RocksDB {
+    db: DB,
+}
+
+impl KVStore for RocksDB {
+    fn init(file_path: &str) -> Self {
+        RocksDB { db:DB::open_default(file_path).unwrap() }
+    }
+
+    fn save(&self, k: &MessageKey, v: &MessageInfo) -> bool {
+        let serialized_k = serde_json::to_string(&k).unwrap();
+        let serialized_v = serde_json::to_string(&v).unwrap();
+
+        if self.db.put(serialized_k.as_bytes(), serialized_v.as_bytes()).is_err() {
+            println!("database seve error when saving key {:?} with value {:?}", &k, &v);
+            false
+        } else {
+            true
+        }
+    }
+
+    fn find(&self, k: &MessageKey) -> Option<MessageInfo> {
+        let serialized_k = serde_json::to_string(&k).unwrap();
+        match self.db.get(serialized_k.as_bytes()) {
+            Ok(Some(v)) => {
+                let result = String::from_utf8(v).unwrap();
+                println!("Finding '{:?}' returns '{}'", k, result);
+                let result: MessageInfo = serde_json::from_str(&result).unwrap();
+                Some(result)
+            },
+            Ok(None) => {
+                println!("Finding '{:?}' returns None", k);
+                None
+            },
+            Err(e) => {
+                println!("Error retrieving value for {:?}: {}", k, e);
+                None
+            }
+        }
+    }
+
+    fn delete(&self, k: &MessageKey) -> bool {
+        let serialized_k = serde_json::to_string(&k).unwrap();
+        self.db.delete(serialized_k.as_bytes()).is_ok()
+    }
+}
 
 fn get_chat_id(ctx: &UpdateWithCx<AutoSend<Bot>, Message>) -> String {
     let id = ctx.update.chat_id();
@@ -127,7 +187,7 @@ fn get_text(ctx: &UpdateWithCx<AutoSend<Bot>, Message>) -> Option<String> {
 }
 
 async fn parse_message(ctx: &UpdateWithCx<AutoSend<Bot>, Message>,
-                 db: Arc<Mutex<HashMap<MessageKey, MessageInfo>>>) -> Result<(), RequestError> {
+                 db: Arc<Mutex<RocksDB>>) -> Result<(), RequestError> {
     let url: Option<Url>;
     let link = get_msg_link(&ctx);
     let chat_id = get_chat_id(&ctx);
@@ -147,10 +207,12 @@ async fn parse_message(ctx: &UpdateWithCx<AutoSend<Bot>, Message>,
     }
     if let Some(url) = url {
         let key = MessageKey{chat_id, url:url.clone()};
-        let mut db = db.lock().await;
-        if let Some(info) = db.get_mut(&key){
+        let db = db.lock().await;
+        if let Some(info) = db.find(&key){
+            let mut info = info.clone();
             // has seen this message before
             info.count += 1;
+            db.save(&key, &info);
             // ctx.answer(format!("See it {} times", info.count)).await?;
             println!("See it {} times", info.count);
             let link_msg = match &info.link {
@@ -168,7 +230,8 @@ async fn parse_message(ctx: &UpdateWithCx<AutoSend<Bot>, Message>,
             ctx.reply_to(final_msg).await?;
         } else {
             // has not seen this message before
-            db.insert(key.clone(), MessageInfo{url, count:1, link});
+            let value = MessageInfo{url, count:1, link};
+            db.save(&key, &value);
         };
     } else {
         if let Some(text) = get_text(&ctx) {
@@ -208,7 +271,7 @@ fn need_handle(ctx: &UpdateWithCx<AutoSend<Bot>, Message>) -> bool {
     ret_val
 }
 
-async fn run(db: Arc<Mutex<HashMap<MessageKey, MessageInfo>>>) {
+async fn run(db: Arc<Mutex<RocksDB>>) {
     teloxide::enable_logging!();
     log::info!("Starting simple_commands_bot...");
 
@@ -229,6 +292,6 @@ async fn run(db: Arc<Mutex<HashMap<MessageKey, MessageInfo>>>) {
 
 #[tokio::main]
 async fn main() {
-    let db = Arc::new(Mutex::new(HashMap::<MessageKey, MessageInfo>::new()));
+    let db = Arc::new(Mutex::new(RocksDB::init("bot_db")));
     run(db.clone()).await;
 }
