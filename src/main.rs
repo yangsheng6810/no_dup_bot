@@ -9,7 +9,7 @@ use tokio::sync::Mutex;
 use url::Url;
 use serde::{Deserialize, Serialize};
 
-use rocksdb::{DB, Options};
+use kv;
 
 #[derive(BotCommand)]
 #[command(rename = "lowercase", description = "These commands are supported:")]
@@ -72,20 +72,24 @@ pub trait KVStore {
     fn delete(&self, k: &MessageKey) -> bool;
 }
 
-pub struct RocksDB {
-    db: DB,
+pub struct RocksDB<'a> {
+    db: kv::Bucket<'a, kv::Raw, kv::Raw>,
 }
 
-impl KVStore for RocksDB {
+impl KVStore for RocksDB<'_> {
     fn init(file_path: &str) -> Self {
-        RocksDB { db:DB::open_default(file_path).unwrap() }
+        let mut cfg = kv::Config::new(file_path);
+        let store = kv::Store::new(cfg).unwrap();
+        let db = store.bucket::<kv::Raw, kv::Raw>(None).unwrap();
+
+        RocksDB { db}
     }
 
     fn save(&self, k: &MessageKey, v: &MessageInfo) -> bool {
         let serialized_k = serde_json::to_string(&k).unwrap();
         let serialized_v = serde_json::to_string(&v).unwrap();
 
-        if self.db.put(serialized_k.as_bytes(), serialized_v.as_bytes()).is_err() {
+        if self.db.set(serialized_k.as_bytes(), serialized_v.as_bytes()).is_err() {
             println!("database seve error when saving key {:?} with value {:?}", &k, &v);
             false
         } else {
@@ -97,7 +101,7 @@ impl KVStore for RocksDB {
         let serialized_k = serde_json::to_string(&k).unwrap();
         match self.db.get(serialized_k.as_bytes()) {
             Ok(Some(v)) => {
-                let result = String::from_utf8(v).unwrap();
+                let result = String::from_utf8(v.to_vec()).unwrap();
                 println!("Finding '{:?}' returns '{}'", k, result);
                 let result: MessageInfo = serde_json::from_str(&result).unwrap();
                 Some(result)
@@ -115,7 +119,7 @@ impl KVStore for RocksDB {
 
     fn delete(&self, k: &MessageKey) -> bool {
         let serialized_k = serde_json::to_string(&k).unwrap();
-        self.db.delete(serialized_k.as_bytes()).is_ok()
+        self.db.remove(serialized_k.as_bytes()).is_ok()
     }
 }
 
@@ -187,7 +191,7 @@ fn get_text(ctx: &UpdateWithCx<AutoSend<Bot>, Message>) -> Option<String> {
 }
 
 async fn parse_message(ctx: &UpdateWithCx<AutoSend<Bot>, Message>,
-                 db: Arc<Mutex<RocksDB>>) -> Result<(), RequestError> {
+                 db: Arc<Mutex<RocksDB<'_>>>) -> Result<(), RequestError> {
     let url: Option<Url>;
     let link = get_msg_link(&ctx);
     let chat_id = get_chat_id(&ctx);
@@ -271,7 +275,7 @@ fn need_handle(ctx: &UpdateWithCx<AutoSend<Bot>, Message>) -> bool {
     ret_val
 }
 
-async fn run(db: Arc<Mutex<RocksDB>>) {
+async fn run(db: Arc<Mutex<RocksDB<'_>>>) {
     teloxide::enable_logging!();
     log::info!("Starting simple_commands_bot...");
 
