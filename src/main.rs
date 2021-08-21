@@ -3,13 +3,12 @@ use teloxide::{prelude::*, utils::command::BotCommand};
 use teloxide::RequestError;
 use std::error::Error;
 
-use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::Mutex;
 use url::Url;
 use serde::{Deserialize, Serialize};
 
-use kv;
+use sled;
 
 #[derive(BotCommand)]
 #[command(rename = "lowercase", description = "These commands are supported:")]
@@ -72,24 +71,20 @@ pub trait KVStore {
     fn delete(&self, k: &MessageKey) -> bool;
 }
 
-pub struct RocksDB<'a> {
-    db: kv::Bucket<'a, kv::Raw, kv::Raw>,
+pub struct RocksDB {
+    db: sled::Db,
 }
 
-impl KVStore for RocksDB<'_> {
+impl KVStore for RocksDB {
     fn init(file_path: &str) -> Self {
-        let mut cfg = kv::Config::new(file_path);
-        let store = kv::Store::new(cfg).unwrap();
-        let db = store.bucket::<kv::Raw, kv::Raw>(None).unwrap();
-
-        RocksDB { db}
+        RocksDB { db: sled::open(file_path).unwrap()}
     }
 
     fn save(&self, k: &MessageKey, v: &MessageInfo) -> bool {
         let serialized_k = serde_json::to_string(&k).unwrap();
         let serialized_v = serde_json::to_string(&v).unwrap();
 
-        if self.db.set(serialized_k.as_bytes(), serialized_v.as_bytes()).is_err() {
+        if self.db.insert(serialized_k.as_bytes(), serialized_v.as_bytes()).is_err() {
             println!("database seve error when saving key {:?} with value {:?}", &k, &v);
             false
         } else {
@@ -191,7 +186,7 @@ fn get_text(ctx: &UpdateWithCx<AutoSend<Bot>, Message>) -> Option<String> {
 }
 
 async fn parse_message(ctx: &UpdateWithCx<AutoSend<Bot>, Message>,
-                 db: Arc<Mutex<RocksDB<'_>>>) -> Result<(), RequestError> {
+                 db: Arc<Mutex<RocksDB>>) -> Result<(), RequestError> {
     let url: Option<Url>;
     let link = get_msg_link(&ctx);
     let chat_id = get_chat_id(&ctx);
@@ -275,7 +270,7 @@ fn need_handle(ctx: &UpdateWithCx<AutoSend<Bot>, Message>) -> bool {
     ret_val
 }
 
-async fn run(db: Arc<Mutex<RocksDB<'_>>>) {
+async fn run(db: Arc<Mutex<RocksDB>>) {
     teloxide::enable_logging!();
     log::info!("Starting simple_commands_bot...");
 
