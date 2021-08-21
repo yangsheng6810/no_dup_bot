@@ -1,5 +1,5 @@
 use teloxide::{prelude::*, utils::command::BotCommand};
-use teloxide::types::{User, ForwardedFrom, Chat};
+// use teloxide::types::{User, ForwardedFrom, Chat};
 use teloxide::RequestError;
 use std::error::Error;
 
@@ -19,6 +19,8 @@ enum Command {
     UsernameAndAge { username: String, age: u8 },
 }
 
+// Copied from examples, kept as reference for future adding command support
+#[allow(dead_code)]
 async fn answer(
     cx: UpdateWithCx<AutoSend<Bot>, Message>,
     command: Command,
