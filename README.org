@@ -1,0 +1,22 @@
+#+TITLE: No Duplication Bot
+A Telegram bot that shouts out when some channel message is forwarded to a group multiple times. [[README_cn.org][中文 Readme]]
+
+
+We love to forward all kinds of messages (usually some kind of news) to group chats, and the messages sometimes lead to nice discussions. However, a same message may be forwarded multiple times, usually by users who didn't see the first forward and discussion. It soon becomes frustrating: people who saw its previously feel the forwarder wasn't reading discussion history, while the new forwarder has no idea that it was forwarded before. This bot detects the later forwards, reply to those with a link to the first forwarded message in the current group.
+
+* Design
+ Currently, the bot reacts to either
+ - a message that is a URL,
+ - a message forwarded from a public channel.
+
+It does not reacts to
+- a message forwarded from another group,
+- a message forwarded from the current group (This is by design, as it is a very common practice known as “复读机”),
+- a message from a private chat.
+
+When a message is forwarded into the current group, we obtain a link to the original message from the public channel. Previously seen links are stored in a KV store with some other information, including the number of times we have seen it in the current group.  If we have seen new link before, we increase its count, reply to the message with the link. Otherwise, we just store it in the KV store with a count of one. To have separate counting for different group, the id of the group is also part of the key. The handling of a URL is similar.
+
+* Plans
+ - React to the reappearance of a picture: some say there is a unique ID for images in Telegram. If one is forwarded (possibly not from a public channel), we can detect it with the ID
+ - Reply ~/delete~ to a message by the bot, and delete that message. There are quite some obstacles in making it work, under the rust based Telegram Bot framework [[https://github.com/teloxide/teloxide][teloxide]]
+
