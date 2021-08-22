@@ -1,44 +1,10 @@
-use teloxide::{prelude::*, utils::command::BotCommand};
-// use teloxide::types::{User, ForwardedFrom, Chat};
-use teloxide::RequestError;
-use std::error::Error;
+use teloxide::{prelude::*, RequestError};
 
 use std::sync::Arc;
 use tokio::sync::Mutex;
+
 use url::Url;
 use serde::{Deserialize, Serialize};
-
-use sled;
-
-#[derive(BotCommand)]
-#[command(rename = "lowercase", description = "These commands are supported:")]
-enum Command {
-    #[command(description = "display this text.")]
-    Help,
-    #[command(description = "handle a username.")]
-    Username(String),
-    #[command(description = "handle a username and an age.", parse_with = "split")]
-    UsernameAndAge { username: String, age: u8 },
-}
-
-// Copied from examples, kept as reference for future adding command support
-#[allow(dead_code)]
-async fn answer(
-    cx: UpdateWithCx<AutoSend<Bot>, Message>,
-    command: Command,
-) -> Result<(), Box<dyn Error + Send + Sync>> {
-    match command {
-        Command::Help => cx.answer(Command::descriptions()).await?,
-        Command::Username(username) => {
-            cx.answer(format!("Your username is @{}.", username)).await?
-        }
-        Command::UsernameAndAge { username, age } => {
-            cx.answer(format!("Your username is @{} and age is {}.", username, age)).await?
-        }
-    };
-
-    Ok(())
-}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MessageInfo {
@@ -71,13 +37,13 @@ pub trait KVStore {
     fn delete(&self, k: &MessageKey) -> bool;
 }
 
-pub struct RocksDB {
+pub struct MyDB {
     db: sled::Db,
 }
 
-impl KVStore for RocksDB {
+impl KVStore for MyDB {
     fn init(file_path: &str) -> Self {
-        RocksDB { db: sled::open(file_path).unwrap()}
+        MyDB { db: sled::open(file_path).unwrap()}
     }
 
     fn save(&self, k: &MessageKey, v: &MessageInfo) -> bool {
@@ -186,7 +152,7 @@ fn get_text(ctx: &UpdateWithCx<AutoSend<Bot>, Message>) -> Option<String> {
 }
 
 async fn parse_message(ctx: &UpdateWithCx<AutoSend<Bot>, Message>,
-                 db: Arc<Mutex<RocksDB>>) -> Result<(), RequestError> {
+                 db: Arc<Mutex<MyDB>>) -> Result<(), RequestError> {
     let url: Option<Url>;
     let link = get_msg_link(&ctx);
     let chat_id = get_chat_id(&ctx);
@@ -270,7 +236,7 @@ fn need_handle(ctx: &UpdateWithCx<AutoSend<Bot>, Message>) -> bool {
     ret_val
 }
 
-async fn run(db: Arc<Mutex<RocksDB>>) {
+async fn run(db: Arc<Mutex<MyDB>>) {
     teloxide::enable_logging!();
     log::info!("Starting simple_commands_bot...");
 
@@ -291,6 +257,6 @@ async fn run(db: Arc<Mutex<RocksDB>>) {
 
 #[tokio::main]
 async fn main() {
-    let db = Arc::new(Mutex::new(RocksDB::init("bot_db")));
+    let db = Arc::new(Mutex::new(MyDB::init("bot_db")));
     run(db.clone()).await;
 }
