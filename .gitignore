@@ -74,3 +74,10 @@ Cargo.lock
 
 # End of https://www.toptal.com/developers/gitignore/api/rust,emacs
 
+
+
+### XeLaTeX ###
+# Written by Neruthes
+docs/*/*.log
+docs/*/*.aux
+docs/*/*.out
