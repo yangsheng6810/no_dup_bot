@@ -12,13 +12,41 @@ use serde::{Deserialize, Serialize};
 enum Command {
     #[command(description = "Get help")]
     Help,
-    #[command(description = "Reply to a bot message to delete it")]
-    Delete,
+    // #[command(description = "Reply to a bot message to delete it")]
+    // Delete,
     #[command(description = "Show most duplicated messages (WIP)")]
     Top,
 }
 
+// returns true if we can get where this message is from, and it matches the
+// author of the message that our bot answered
+//
+// Due to limitation of Telegram API, we can only go one hop for replied
+// message, but no more. Therefore, we can not achieve this
+#[allow(dead_code)]
+fn come_from_original_author(cx: &UpdateWithCx<AutoSend<Bot>, Message>) -> bool {
+    if let Some(this_message_from) = cx.update.from() {
+        dbg!(this_message_from);
+        if let Some(message) = cx.update.reply_to_message() {
+            dbg!(message);
+            if let Some(first_message) = message.reply_to_message() {
+                dbg!(first_message);
+                if let Some(original_from) = first_message.from(){
+                    dbg!(original_from);
+                    if original_from.id == this_message_from.id {
+                        return true
+                    }
+                }
+            }
+        }
+    }
+    // TODO: should return false, but we can not reliably detect come from
+    // original author, so we temporarily always return true
+    true
+}
+
 // Delete the replied message
+#[allow(dead_code)]
 async fn delete_replied_msg(cx: &UpdateWithCx<AutoSend<Bot>, Message>,
                             with_bot_name: bool)
                             -> Result<(), RequestError> {
@@ -28,9 +56,12 @@ async fn delete_replied_msg(cx: &UpdateWithCx<AutoSend<Bot>, Message>,
                 if let Some(username) = &usr.username {
                     if username.eq("no_dup_bot") {
                         println!("Start deleting message");
-                        cx.requester
-                          .delete_message(cx.update.chat_id(), message.id)
-                          .await?;
+                        if come_from_original_author(cx) {
+                            println!("Deleting message as it comes from the same author");
+                            cx.requester
+                              .delete_message(cx.update.chat_id(), message.id)
+                              .await?;
+                        }
                     }
                 }
             } else {
@@ -302,7 +333,7 @@ async fn action(
                 ctx.answer(Command::descriptions()).send().await.map(|_| ())?
             }
         },
-        Command::Delete => delete_replied_msg(&ctx, with_bot_name).await?,
+        // Command::Delete => delete_replied_msg(&ctx, with_bot_name).await?,
         Command::Top => {
             if with_bot_name {
                 unimplemented!();
