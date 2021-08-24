@@ -1,10 +1,52 @@
 use teloxide::{prelude::*, RequestError};
+use teloxide::utils::command::BotCommand;
 
 use std::sync::Arc;
 use tokio::sync::Mutex;
 
 use url::Url;
 use serde::{Deserialize, Serialize};
+
+#[derive(BotCommand)]
+#[command(rename = "lowercase", description = "These commands are supported:")]
+enum Command {
+    #[command(description = "Get help")]
+    Help,
+    #[command(description = "Reply to a bot message to delete it")]
+    Delete,
+    #[command(description = "Show most duplicated messages (WIP)")]
+    Top,
+}
+
+// Delete the replied message
+async fn delete_replied_msg(cx: &UpdateWithCx<AutoSend<Bot>, Message>,
+                            with_bot_name: bool)
+                            -> Result<(), RequestError> {
+    match cx.update.reply_to_message() {
+        Some(message) => {
+            if let Some(usr) = message.from() {
+                if let Some(username) = &usr.username {
+                    if username.eq("no_dup_bot") {
+                        println!("Start deleting message");
+                        cx.requester
+                          .delete_message(cx.update.chat_id(), message.id)
+                          .await?;
+                    }
+                }
+            } else {
+                println!("Trying to delete a message without user");
+            }
+        }
+        None => {
+            // println!("Use this command in a reply to another message!");
+            if with_bot_name {
+                cx.reply_to("Use this command in a reply to another message!").send().await?;
+            }
+        }
+    }
+    Ok(())
+}
+
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MessageInfo {
@@ -220,6 +262,7 @@ fn need_handle(ctx: &UpdateWithCx<AutoSend<Bot>, Message>) -> bool {
     // dbg!(ctx.update.forward_from_message_id());
     // dbg!(ctx.update.forward_date());
     // dbg!(ctx.update.forward_signature());
+    // dbg!(ctx.update.reply_to_message());
 
     let mut ret_val = false;
     if is_forward(&ctx) {
@@ -236,18 +279,62 @@ fn need_handle(ctx: &UpdateWithCx<AutoSend<Bot>, Message>) -> bool {
     ret_val
 }
 
+async fn handle_command(ctx: &UpdateWithCx<AutoSend<Bot>, Message>) -> Result<bool, RequestError> {
+    let bot_name_str = "@no_dup_bot";
+    if let Some(text) = ctx.update.text() {
+        if let Ok(command) = Command::parse(text, "") {
+            let with_bot_name = text.contains(bot_name_str);
+            action(&ctx, command, with_bot_name).await?;
+            return Ok(true)
+        }
+    }
+    return Ok(false)
+}
+
+async fn action(
+    ctx: &UpdateWithCx<AutoSend<Bot>, Message>,
+    command: Command,
+    with_bot_name: bool
+) -> Result<(), RequestError> {
+    match command {
+        Command::Help => {
+            if with_bot_name {
+                ctx.answer(Command::descriptions()).send().await.map(|_| ())?
+            }
+        },
+        Command::Delete => delete_replied_msg(&ctx, with_bot_name).await?,
+        Command::Top => {
+            if with_bot_name {
+                unimplemented!();
+            }
+        }
+    };
+
+    Ok(())
+}
+
+
 async fn run(db: Arc<Mutex<MyDB>>) {
     teloxide::enable_logging!();
     log::info!("Starting simple_commands_bot...");
 
     let bot = Bot::from_env().auto_send();
 
+    // bot.set_my_commands(vec![teloxide::types::BotCommand::new("help", "delete")]).send().await.unwrap();
+
     let db = db.clone();
     teloxide::repl(bot, move |ctx| {
         let db = db.clone();
         async move {
-            if need_handle(&ctx) {
-                parse_message(&ctx, db).await?;
+            match handle_command(&ctx).await {
+                Ok(true) => {
+                    println!("Command handled successfully");
+                },
+                Ok(false) | Err(_) => {
+                    if need_handle(&ctx) {
+                        parse_message(&ctx, db).await?;
+                    }
+                },
             }
             respond(())
         }
