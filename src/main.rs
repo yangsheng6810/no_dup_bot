@@ -1,4 +1,4 @@
-use teloxide::{prelude::*, RequestError, net::Download, types::File as TgFile, types::PhotoSize};
+use teloxide::{prelude::*, net::Download, types::File as TgFile, types::PhotoSize};
 use tokio::fs::File;
 
 use std::sync::Arc;
@@ -9,6 +9,8 @@ use serde::{Deserialize, Serialize};
 
 use std::time::{SystemTime, UNIX_EPOCH};
 use std::io::{Error, ErrorKind};
+
+use anyhow::Result;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MessageInfo {
@@ -149,7 +151,7 @@ fn remove_file(filename: &str) {
         .err().map(|e| println!("Unable to delete file {:?}", e));
 }
 
-async fn get_hash(ctx: &UpdateWithCx<AutoSend<Bot>, Message>, img_to_download: &PhotoSize) -> Result<Option<String>, RequestError>{
+async fn get_hash(ctx: &UpdateWithCx<AutoSend<Bot>, Message>, img_to_download: &PhotoSize) -> Result<Option<String>>{
     let filename = get_filename();
     let TgFile { file_path, .. } = ctx.requester.get_file(&img_to_download.file_id).send().await?;
     match File::create(&filename).await {
@@ -188,7 +190,7 @@ async fn get_hash(ctx: &UpdateWithCx<AutoSend<Bot>, Message>, img_to_download: &
 }
 
 async fn parse_message(ctx: &UpdateWithCx<AutoSend<Bot>, Message>,
-                 db: Arc<Mutex<MyDB>>) -> Result<(), RequestError> {
+                 db: Arc<Mutex<MyDB>>) -> Result<()> {
     let mut url: Option<Url>;
     let link = get_msg_link(&ctx);
     let chat_id = get_chat_id(&ctx);
@@ -214,7 +216,8 @@ async fn parse_message(ctx: &UpdateWithCx<AutoSend<Bot>, Message>,
             // is an image, but not forward
             println!("Found an image message that is not a forward");
             url = None;
-            let img_vec = ctx.update.photo().ok_or(RequestError::Io(Error::new(ErrorKind::Other, "failed to download img_vec")))?;
+            let img_vec = ctx.update.photo()
+                                    .ok_or(Error::new(ErrorKind::Other, "failed to download img_vec"))?;
             let mut img_to_download: Option<PhotoSize> = None;
             for img in img_vec.iter() {
                 // dbg!(img);
@@ -325,7 +328,13 @@ async fn run(db: Arc<Mutex<MyDB>>) {
         let db = db.clone();
         async move {
             if need_handle(&ctx) {
-                parse_message(&ctx, db).await?;
+                // TODO: think of a better way to do it.
+                // Currently decided to suppress this error.
+                // teloxide seem to want a RequestError, while we would want a general Error
+                parse_message(&ctx, db).await.err().map(
+                    |e|
+                    println!("parse_message see error {:?}", e)
+                );
             }
             respond(())
         }
