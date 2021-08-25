@@ -11,6 +11,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use std::io::{Error, ErrorKind};
 
 use anyhow::Result;
+use img_hash::ImageHash;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MessageInfo {
@@ -189,8 +190,70 @@ async fn get_hash(ctx: &UpdateWithCx<AutoSend<Bot>, Message>, img_to_download: &
     }
 }
 
-async fn parse_message(ctx: &UpdateWithCx<AutoSend<Bot>, Message>,
-                 db: Arc<Mutex<MyDB>>) -> Result<()> {
+fn sled_to_object<'a, T>(value: sled::IVec) -> T
+where
+    T: Deserialize<'a>
+{
+    serde_json::from_str::<T>(&String::from_utf8(value.to_vec()).unwrap()).unwrap()
+}
+
+fn object_to_sled<T>(ss: T) -> sled::IVec
+where
+    T: Serialize
+{
+    sled::IVec::from(serde_json::to_string(&ss).unwrap().as_bytes())
+}
+
+async fn check_img_hash(img_db: Arc<Mutex<sled::Db>>, hash: String) -> Result<Option<MessageKey>> {
+    let similarity_threshold = 10u32;
+    let hash = ImageHash::from_base64(&hash).unwrap();
+    let img_db = img_db.lock().await;
+    let mut best_hash: Option<ImageHash> = None;
+    let mut best_dist: Option<u32> = None;
+    let mut best_url: Option<MessageKey> = None;
+    for ans in img_db.iter() {
+        ans.ok().map(
+            |(key, value)| {
+                let key = sled_to_object::<String>(key);
+                let value = sled_to_object::<MessageKey>(value);
+                println!("Saw {:?} {:?}", &key, &value);
+                let iter_hash = ImageHash::from_base64(&key).unwrap();
+                let dist = iter_hash.dist(&hash);
+                match best_dist {
+                    None => {
+                        best_hash = Some(iter_hash);
+                        best_dist = Some(dist);
+                        best_url = Some(value);
+                    },
+                    Some(old_dist) => {
+                        if dist < old_dist {
+                            best_hash = Some(iter_hash);
+                            best_dist = Some(dist);
+                            best_url = Some(value);
+                        }
+                    }
+                }
+            });
+    }
+    match best_dist {
+        Some(dist) => {
+            if dist < similarity_threshold {
+                Ok(best_url)
+            } else {
+                Ok(None)
+            }
+        },
+        None => {
+            Ok(None)
+        }
+    }
+}
+
+async fn parse_message(
+    ctx: &UpdateWithCx<AutoSend<Bot>, Message>,
+    db: Arc<Mutex<MyDB>>,
+    img_db: Arc<Mutex<sled::Db>>
+) -> Result<()> {
     let mut url: Option<Url>;
     let link = get_msg_link(&ctx);
     let chat_id = get_chat_id(&ctx);
@@ -235,8 +298,16 @@ async fn parse_message(ctx: &UpdateWithCx<AutoSend<Bot>, Message>,
             if let Some(img) = img_to_download {
                 match get_hash(&ctx, &img).await {
                     Ok(Some(hash)) => {
-                        url = Url::parse(&format!("https://img.telegram.com/{}", &hash)).ok();
-                        println!("Get hash {}", hash);
+                        println!("Get hash {}", &hash);
+                        match check_img_hash(img_db, hash.clone()).await.ok() {
+                            Some(Some(key)) => {
+                                println!("Get real hash {:?}", key.url);
+                                url = Some(key.url.clone());
+                            },
+                            _ => {
+                                url = Url::parse(&format!("https://img.telegram.com/{}", hash)).ok();
+                            }
+                        }
                     },
                     Ok(None) => {
                         println!("Failed to get hash");
@@ -317,7 +388,8 @@ fn need_handle(ctx: &UpdateWithCx<AutoSend<Bot>, Message>) -> bool {
         || is_image(&ctx)
 }
 
-async fn run(db: Arc<Mutex<MyDB>>) {
+async fn run(db: Arc<Mutex<MyDB>>,
+             img_db: Arc<Mutex<sled::Db>>) {
     teloxide::enable_logging!();
     log::info!("Starting simple_commands_bot...");
 
@@ -326,12 +398,13 @@ async fn run(db: Arc<Mutex<MyDB>>) {
     let db = db.clone();
     teloxide::repl(bot, move |ctx| {
         let db = db.clone();
+        let img_db = img_db.clone();
         async move {
             if need_handle(&ctx) {
                 // TODO: think of a better way to do it.
                 // Currently decided to suppress this error.
                 // teloxide seem to want a RequestError, while we would want a general Error
-                parse_message(&ctx, db).await.err().map(
+                parse_message(&ctx, db, img_db).await.err().map(
                     |e|
                     println!("parse_message see error {:?}", e)
                 );
@@ -345,5 +418,6 @@ async fn run(db: Arc<Mutex<MyDB>>) {
 #[tokio::main]
 async fn main() {
     let db = Arc::new(Mutex::new(MyDB::init("bot_db")));
-    run(db.clone()).await;
+    let img_db = Arc::new(Mutex::new(sled::open("bot_img").unwrap()));
+    run(db.clone(), img_db.clone()).await;
 }
