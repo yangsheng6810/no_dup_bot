@@ -1,10 +1,16 @@
-use teloxide::{prelude::*, RequestError};
+use teloxide::{prelude::*, net::Download, types::File as TgFile, types::PhotoSize};
+use tokio::fs::File;
 
 use std::sync::Arc;
 use tokio::sync::Mutex;
 
 use url::Url;
 use serde::{Deserialize, Serialize};
+
+use std::time::{SystemTime, UNIX_EPOCH};
+use std::io::{Error, ErrorKind};
+
+use anyhow::Result;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MessageInfo {
@@ -87,10 +93,9 @@ impl KVStore for MyDB {
 fn get_chat_id(ctx: &UpdateWithCx<AutoSend<Bot>, Message>) -> String {
     let id = ctx.update.chat_id();
     let id_str = id.to_string();
-    match id_str.strip_prefix("-100") {
-        Some(id) => String::from(id),
-        None => id_str
-    }
+    id_str.strip_prefix("-100")
+          .map_or(id_str.clone(),
+                  |id| String::from(id))
 }
 
 fn get_msg_link(ctx: &UpdateWithCx<AutoSend<Bot>, Message>) -> Option<Url> {
@@ -110,64 +115,145 @@ fn get_msg_link(ctx: &UpdateWithCx<AutoSend<Bot>, Message>) -> Option<Url> {
 }
 
 fn get_forward_msg_link(message: &UpdateWithCx<AutoSend<Bot>, Message>) -> Option<Url> {
-    if let Some(chat) = message.update.forward_from_chat(){
-        dbg!(chat.username());
-        if let (Some(username), Some(message_id))
-            = (chat.username(), message.update.forward_from_message_id())
-        {
-            match Url::parse(&format!("https://t.me/{}/{}", username, message_id)) {
-                Ok(url) => {
-                    dbg!(&url);
-                    Some(url)
-                },
-                Err(_) => None
-            }
-        } else {
-            println!("Parse forwarded message failed");
-            dbg!(chat);
-            None
-        }
+    let chat = message.update.forward_from_chat()?;
+    dbg!(chat.username());
+    if let (Some(username), Some(message_id))
+        = (chat.username(), message.update.forward_from_message_id())
+    {
+        let url = Url::parse(&format!("https://t.me/{}/{}", username, message_id)).ok();
+        dbg!(&url);
+        url
     } else {
+        println!("Parse forwarded message failed");
+        dbg!(chat);
         None
     }
 }
 
 fn get_url(ctx: &UpdateWithCx<AutoSend<Bot>, Message>) -> Option<Url> {
-    if let Some(ss) = ctx.update.text().to_owned() {
-        match Url::parse(ss) {
-            Ok(url) => Some(url),
-            Err(_) => None
-        }
-    } else {
-        None
-    }
+    let ss = ctx.update.text().to_owned()?;
+    Url::parse(ss).ok()
 }
 
 fn get_text(ctx: &UpdateWithCx<AutoSend<Bot>, Message>) -> Option<String> {
-    if let Some(ss) = ctx.update.text().to_owned() {
-        Some(String::from(ss))
-    } else {
-        None
+    let ss = ctx.update.text().to_owned()?;
+    Some(String::from(ss))
+}
+
+fn get_filename() -> String {
+    let duration = SystemTime::now().duration_since(UNIX_EPOCH).expect("Time went back");
+    let filename = format!("./{}.jpeg", duration.as_secs());
+    filename
+}
+
+fn remove_file(filename: &str) {
+    std::fs::remove_file(filename)
+        .err().map(|e| println!("Unable to delete file {:?}", e));
+}
+
+async fn get_hash(ctx: &UpdateWithCx<AutoSend<Bot>, Message>, img_to_download: &PhotoSize) -> Result<Option<String>>{
+    let filename = get_filename();
+    let TgFile { file_path, .. } = ctx.requester.get_file(&img_to_download.file_id).send().await?;
+    match File::create(&filename).await {
+        Ok(mut file) => {
+            match ctx.requester.download_file(&file_path, &mut file).await {
+                Ok(x) => {
+                    dbg!(x);
+                    println!("Download success to file {:?}", file);
+                    match image::open(&filename) {
+                        Ok(image) => {
+                            let hasher = img_hash::HasherConfig::new().to_hasher();
+                            let hash = Some(hasher.hash_image(&image).to_base64());
+                            remove_file(&filename);
+                            Ok(hash)
+                        },
+                        Err(e) => {
+                            println!("Failed to re-read file, {:?}", e);
+                            remove_file(&filename);
+                            Ok(None)
+                        }
+                    }
+                },
+                Err(e) => {
+                    println!("Download error {:?}", e);
+                    remove_file(&filename);
+                    Ok(None)
+                }
+            }
+        },
+        Err(e) => {
+            println!("Cannot create tempfile due to {:?}", e);
+            remove_file(&filename);
+            Ok(None)
+        }
     }
 }
 
 async fn parse_message(ctx: &UpdateWithCx<AutoSend<Bot>, Message>,
-                 db: Arc<Mutex<MyDB>>) -> Result<(), RequestError> {
-    let url: Option<Url>;
+                 db: Arc<Mutex<MyDB>>) -> Result<()> {
+    let mut url: Option<Url>;
     let link = get_msg_link(&ctx);
     let chat_id = get_chat_id(&ctx);
 
-    if is_forward(&ctx) {
-        println!("Found a forwarded message");
-        url = get_forward_msg_link(&ctx);
-        if url.is_none(){
-            println!("Forwarded message link parse failure.")
-        }
-    } else {
-        println!("Found a non-forwarded message");
-        url = get_url(&ctx);
-        if url.is_none(){
-            println!("Non-forwarded message link parse failure.")
+    match (is_forward(&ctx), is_image(&ctx)) {
+        (true, false) => {
+            // is a forward message
+            println!("Found a forwarded message");
+            url = get_forward_msg_link(&ctx);
+            if url.is_none(){
+                println!("Forwarded message link parse failure.")
+            }
+        },
+        // (true, true) => {
+        //     // is a forward and an image
+        //     println!("Found an image message that is also forward");
+        //     url = get_forward_msg_link(&ctx);
+        //     if url.is_none(){
+        //         println!("Forwarded message link parse failure.")
+        //     }
+        // },
+        (_, true) => {
+            // is an image, but not forward
+            println!("Found an image message that is not a forward");
+            url = None;
+            let img_vec = ctx.update.photo()
+                                    .ok_or(Error::new(ErrorKind::Other, "failed to download img_vec"))?;
+            let mut img_to_download: Option<PhotoSize> = None;
+            for img in img_vec.iter() {
+                // dbg!(img);
+                match img_to_download {
+                    None => {
+                        img_to_download = Some(img.clone());
+                    },
+                    Some(ref temp_img) => {
+                        if img.width <= 600 && img.width > temp_img.width {
+                            img_to_download = Some(img.clone());
+                        }
+                    }
+                }
+            }
+            if let Some(img) = img_to_download {
+                match get_hash(&ctx, &img).await {
+                    Ok(Some(hash)) => {
+                        url = Url::parse(&format!("https://img.telegram.com/{}", &hash)).ok();
+                        println!("Get hash {}", hash);
+                    },
+                    Ok(None) => {
+                        println!("Failed to get hash");
+                    }
+                    Err(e) => {
+                        println!("Get hash error {:?}", e);
+                    }
+                };
+            }
+        },
+        (false, false) => {
+            // not forward nor image, only interested in pure url
+            println!("Found a non-forward, non-image message");
+            url = get_url(&ctx);
+            if url.is_none(){
+                println!("Non-forwarded message link parse failure.")
+            }
         }
     }
     if let Some(url) = url {
@@ -180,15 +266,9 @@ async fn parse_message(ctx: &UpdateWithCx<AutoSend<Bot>, Message>,
             db.save(&key, &info);
             // ctx.answer(format!("See it {} times", info.count)).await?;
             println!("See it {} times", info.count);
-            let link_msg = match &info.link {
-                Some(url) => {
-                    format!("第一次出现是在：{}", url)
-                },
-                None => {
-                    // ctx.answer(format!("Last seen in private chat")).await?;
-                    format!("第一次出现是在private chat")
-                }
-            };
+            let link_msg = &info.link.map_or(
+                format!("第一次出现是在private chat"),
+                |url| format!("第一次出现是在：{}", url));
             // ctx.answer(&link_msg).await?;
             let final_msg = format!("你火星了！这条消息是第{}次来到本群了，快去爬楼。{}", info.count, link_msg);
             println!("{}", &final_msg);
@@ -199,9 +279,7 @@ async fn parse_message(ctx: &UpdateWithCx<AutoSend<Bot>, Message>,
             db.save(&key, &value);
         };
     } else {
-        if let Some(text) = get_text(&ctx) {
-            println!("Pong, {}", text);
-        }
+        get_text(&ctx).map(|text| println!("Pong, {}", text));
     }
     Ok(())
 }
@@ -209,6 +287,17 @@ async fn parse_message(ctx: &UpdateWithCx<AutoSend<Bot>, Message>,
 
 fn is_forward(ctx: &UpdateWithCx<AutoSend<Bot>, Message>) -> bool {
     ctx.update.forward_from().is_some() || ctx.update.forward_from_chat().is_some()
+}
+
+fn is_image(ctx: &UpdateWithCx<AutoSend<Bot>, Message>) -> bool {
+    ctx.update.photo().is_some()
+    // match ctx.update.photo() {
+    //     Some(img) => {
+    //         // dbg!(img);
+    //         true
+    //     },
+    //     None => false
+    // }
 }
 
 fn need_handle(ctx: &UpdateWithCx<AutoSend<Bot>, Message>) -> bool {
@@ -221,19 +310,11 @@ fn need_handle(ctx: &UpdateWithCx<AutoSend<Bot>, Message>) -> bool {
     // dbg!(ctx.update.forward_date());
     // dbg!(ctx.update.forward_signature());
 
-    let mut ret_val = false;
-    if is_forward(&ctx) {
-        ret_val = true;
-    } else {
-        if let Some(ss) = ctx.update.text().to_owned() {
-            // dbg!(ss);
-            ret_val = match Url::parse(ss) {
-                Ok(_) => true,
-                Err(_) => false
-            }
-        }
-    }
-    ret_val
+    is_forward(&ctx)
+        || ctx.update.text().to_owned()
+                            .map_or(false,
+                                    |ss| Url::parse(ss).is_ok())
+        || is_image(&ctx)
 }
 
 async fn run(db: Arc<Mutex<MyDB>>) {
@@ -247,7 +328,13 @@ async fn run(db: Arc<Mutex<MyDB>>) {
         let db = db.clone();
         async move {
             if need_handle(&ctx) {
-                parse_message(&ctx, db).await?;
+                // TODO: think of a better way to do it.
+                // Currently decided to suppress this error.
+                // teloxide seem to want a RequestError, while we would want a general Error
+                parse_message(&ctx, db).await.err().map(
+                    |e|
+                    println!("parse_message see error {:?}", e)
+                );
             }
             respond(())
         }
