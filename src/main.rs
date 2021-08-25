@@ -190,18 +190,33 @@ async fn get_hash(ctx: &UpdateWithCx<AutoSend<Bot>, Message>, img_to_download: &
     }
 }
 
-fn sled_to_object<'a, T>(value: sled::IVec) -> T
-where
-    T: Deserialize<'a>
-{
-    serde_json::from_str::<T>(&String::from_utf8(value.to_vec()).unwrap()).unwrap()
-}
+// fn sled_to_object<'a, T>(value: sled::IVec) -> T
+// where
+//     T: Deserialize<'a>
+// {
+//     serde_json::from_str::<T>(&String::from_utf8(value.to_vec()).unwrap()).unwrap()
+// }
 
+#[allow(dead_code)]
 fn object_to_sled<T>(ss: T) -> sled::IVec
 where
     T: Serialize
 {
     sled::IVec::from(serde_json::to_string(&ss).unwrap().as_bytes())
+}
+
+async fn insert_img_hash(img_db: Arc<Mutex<sled::Db>>, hash: String, key: MessageKey) -> bool {
+    let img_db = img_db.lock().await;
+
+    let serialized_k = serde_json::to_string(&hash).unwrap();
+    let serialized_v = serde_json::to_string(&key).unwrap();
+
+    if img_db.insert(serialized_k.as_bytes(), serialized_v.as_bytes()).is_err() {
+        println!("database seve error when saving key {:?} with value {:?}", &hash, &key);
+        false
+    } else {
+        true
+    }
 }
 
 async fn check_img_hash(img_db: Arc<Mutex<sled::Db>>, hash: String) -> Result<Option<MessageKey>> {
@@ -214,8 +229,15 @@ async fn check_img_hash(img_db: Arc<Mutex<sled::Db>>, hash: String) -> Result<Op
     for ans in img_db.iter() {
         ans.ok().map(
             |(key, value)| {
-                let key = sled_to_object::<String>(key);
-                let value = sled_to_object::<MessageKey>(value);
+                // let key = sled_to_object::<String>(key);
+                // let value = sled_to_object::<MessageKey>(value);
+
+                let key = serde_json::from_str::<String>(
+                    &String::from_utf8(key.to_vec()).unwrap()).unwrap();
+
+                let value = serde_json::from_str::<MessageKey>(
+                    &String::from_utf8(value.to_vec()).unwrap()).unwrap();
+
                 println!("Saw {:?} {:?}", &key, &value);
                 let iter_hash = ImageHash::from_base64(&key).unwrap();
                 let dist = iter_hash.dist(&hash);
@@ -238,6 +260,9 @@ async fn check_img_hash(img_db: Arc<Mutex<sled::Db>>, hash: String) -> Result<Op
     match best_dist {
         Some(dist) => {
             if dist < similarity_threshold {
+                println!("the best distance is {}", dist);
+                best_hash.map(|h| println!("with hash {:?}", h.to_base64()));
+                best_url.as_ref().map(|u| println!("with url {:?}", u));
                 Ok(best_url)
             } else {
                 Ok(None)
@@ -299,13 +324,21 @@ async fn parse_message(
                 match get_hash(&ctx, &img).await {
                     Ok(Some(hash)) => {
                         println!("Get hash {}", &hash);
-                        match check_img_hash(img_db, hash.clone()).await.ok() {
-                            Some(Some(key)) => {
-                                println!("Get real hash {:?}", key.url);
+                        match check_img_hash(img_db.clone(), hash.clone()).await {
+                            Ok(Some(key)) => {
+                                println!("Found existing hash {:?} that is close", key.url);
                                 url = Some(key.url.clone());
                             },
                             _ => {
+                                println!("No close hash is found, use original hash {:?}", &hash);
                                 url = Url::parse(&format!("https://img.telegram.com/{}", hash)).ok();
+                                if let Some(url) = url.clone() {
+                                    let key = MessageKey{chat_id: chat_id.clone(), url:url.clone()};
+                                    let ans = insert_img_hash(img_db, hash.clone(), key.clone()).await;
+                                    if ! ans {
+                                        println!("insert error, with hash {:?} and key {:?}", &hash, &key);
+                                    }
+                                }
                             }
                         }
                     },
