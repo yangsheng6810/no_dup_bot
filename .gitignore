@@ -1,5 +1,6 @@
 /target
 /bot_db
+/img_db
 env.sh
 
 # Created by https://www.toptal.com/developers/gitignore/api/rust,emacs

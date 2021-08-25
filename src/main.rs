@@ -451,6 +451,6 @@ async fn run(db: Arc<Mutex<MyDB>>,
 #[tokio::main]
 async fn main() {
     let db = Arc::new(Mutex::new(MyDB::init("bot_db")));
-    let img_db = Arc::new(Mutex::new(sled::open("bot_img").unwrap()));
+    let img_db = Arc::new(Mutex::new(sled::open("img_db").unwrap()));
     run(db.clone(), img_db.clone()).await;
 }
