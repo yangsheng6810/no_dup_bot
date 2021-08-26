@@ -261,9 +261,9 @@ async fn check_img_hash(img_db: Arc<Mutex<sled::Db>>, hash: String) -> Result<Op
     }
     match best_dist {
         Some(dist) => {
+            println!("The best distance is {} among all {} entries", dist, count);
             if dist < similarity_threshold {
-                println!("the best distance is {}", dist);
-                best_hash.map(|h| println!("with hash {:?}", h.to_base64()));
+                best_hash.map(|h| println!("Use this hash! {:?}", h.to_base64()));
                 best_url.as_ref().map(|u| println!("with url {:?}", u));
                 Ok(best_url)
             } else {
