@@ -171,7 +171,8 @@ async fn get_hash(ctx: &UpdateWithCx<AutoSend<Bot>, Message>, img_to_download: &
                         },
                         Err(e) => {
                             println!("Failed to re-read file, {:?}", e);
-                            remove_file(&filename);
+                            // Temporarily disable file remove for debug purpose
+                            // remove_file(&filename);
                             Ok(None)
                         }
                     }
