@@ -29,6 +29,12 @@ pub struct MessageKey {
     url: Url
 }
 
+#[derive(Debug, Clone, Hash, Serialize, Deserialize)]
+pub struct ImageKey {
+    chat_id: String,
+    hash_str: String
+}
+
 impl PartialEq for MessageKey {
     fn eq(&self, other: &Self) -> bool {
         self.chat_id.eq(&other.chat_id) && self.url.eq(&other.url)
@@ -207,10 +213,15 @@ where
     sled::IVec::from(serde_json::to_string(&ss).unwrap().as_bytes())
 }
 
-async fn insert_img_hash(img_db: Arc<Mutex<sled::Db>>, hash: String, key: MessageKey) -> bool {
+async fn insert_img_hash(img_db: &Arc<Mutex<sled::Db>>, hash: &str, chat_id: &str, key: &MessageKey) -> bool {
     let img_db = img_db.lock().await;
 
-    let serialized_k = serde_json::to_string(&hash).unwrap();
+    let img_key = ImageKey{
+        chat_id: String::from(chat_id),
+        hash_str: String::from(hash),
+    };
+
+    let serialized_k = serde_json::to_string(&img_key).unwrap();
     let serialized_v = serde_json::to_string(&key).unwrap();
 
     if img_db.insert(serialized_k.as_bytes(), serialized_v.as_bytes()).is_err() {
@@ -221,39 +232,65 @@ async fn insert_img_hash(img_db: Arc<Mutex<sled::Db>>, hash: String, key: Messag
     }
 }
 
-async fn check_img_hash(img_db: Arc<Mutex<sled::Db>>, hash: String) -> Result<Option<MessageKey>> {
+async fn contains_img_hash(img_db: &Arc<Mutex<sled::Db>>, hash: &str, chat_id: &str) -> bool {
+    let img_db = img_db.lock().await;
+
+    let img_key = ImageKey{
+        chat_id: String::from(chat_id),
+        hash_str: String::from(hash),
+    };
+
+    let serialized_k = serde_json::to_string(&img_key).unwrap();
+
+    if img_db.contains_key(serialized_k.as_bytes()).is_err() {
+        println!("database seve error when looking for key {:?}", &img_key);
+        false
+    } else {
+        true
+    }
+}
+
+// also deletes old img_db entries
+async fn check_img_hash(img_db: &Arc<Mutex<sled::Db>>, hash: &str, chat_id: &str) -> Result<Option<MessageKey>> {
     let similarity_threshold = 8u32;
     let hash = ImageHash::from_base64(&hash).unwrap();
     let img_db = img_db.lock().await;
     let mut best_hash: Option<ImageHash> = None;
     let mut best_dist: Option<u32> = None;
     let mut best_url: Option<MessageKey> = None;
+    let mut count = 0;
     for ans in img_db.iter() {
         ans.ok().map(
             |(key, value)| {
+                count += 1;
                 // let key = sled_to_object::<String>(key);
                 // let value = sled_to_object::<MessageKey>(value);
 
-                let key = serde_json::from_str::<String>(
+                let img_key = serde_json::from_str::<ImageKey>(
                     &String::from_utf8(key.to_vec()).unwrap()).unwrap();
 
                 let value = serde_json::from_str::<MessageKey>(
                     &String::from_utf8(value.to_vec()).unwrap()).unwrap();
 
-                println!("Saw {:?} {:?}", &key, &value);
-                let iter_hash = ImageHash::from_base64(&key).unwrap();
-                let dist = iter_hash.dist(&hash);
-                match best_dist {
-                    None => {
-                        best_hash = Some(iter_hash);
-                        best_dist = Some(dist);
-                        best_url = Some(value);
-                    },
-                    Some(old_dist) => {
-                        if dist < old_dist {
+                let iter_chat_id = &img_key.chat_id;
+                let iter_hash = &img_key.hash_str;
+
+                if iter_chat_id.eq(&chat_id){
+                    // println!("Saw {:?} {:?}", &key, &value);
+                    let iter_hash = ImageHash::from_base64(&iter_hash).unwrap();
+                    let dist = iter_hash.dist(&hash);
+                    match best_dist {
+                        None => {
                             best_hash = Some(iter_hash);
                             best_dist = Some(dist);
                             best_url = Some(value);
+                        },
+                        Some(old_dist) => {
+                            if dist < old_dist {
+                                best_hash = Some(iter_hash);
+                                best_dist = Some(dist);
+                                best_url = Some(value);
+                            }
                         }
                     }
                 }
@@ -326,20 +363,23 @@ async fn parse_message(
                 match get_hash(&ctx, &img).await {
                     Ok(Some(hash)) => {
                         println!("Get hash {}", &hash);
-                        match check_img_hash(img_db.clone(), hash.clone()).await {
+                        match check_img_hash(&img_db, &hash, &chat_id).await {
                             Ok(Some(key)) => {
                                 println!("Found existing hash {:?} that is close", key.url);
                                 url = Some(key.url.clone());
                             },
                             _ => {
                                 println!("No close hash is found, use original hash {:?}", &hash);
-                                url = Url::parse(&format!("https://img.telegram.com/{}", hash)).ok();
-                                if let Some(url) = url.clone() {
-                                    let key = MessageKey{chat_id: chat_id.clone(), url:url.clone()};
-                                    let ans = insert_img_hash(img_db, hash.clone(), key.clone()).await;
-                                    if ! ans {
-                                        println!("insert error, with hash {:?} and key {:?}", &hash, &key);
-                                    }
+                                url = Url::parse(&format!("https://img.telegram.com/{}", hash.clone())).ok();
+                            }
+                        }
+                        // insert the new hash result into img_db, unless an exact key exist.
+                        if let Some(url) = url.clone() {
+                            if contains_img_hash(&img_db, &hash, &chat_id).await {
+                                let key = MessageKey{chat_id: chat_id.clone(), url:url.clone()};
+                                let ans = insert_img_hash(&img_db, &hash, &chat_id, &key).await;
+                                if ! ans {
+                                    println!("insert error, with hash {:?} and key {:?}", &hash, &key);
                                 }
                             }
                         }
