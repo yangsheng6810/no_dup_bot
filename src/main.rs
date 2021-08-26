@@ -161,6 +161,7 @@ async fn get_hash(ctx: &UpdateWithCx<AutoSend<Bot>, Message>, img_to_download: &
                 Ok(x) => {
                     dbg!(x);
                     println!("Download success to file {:?}", file);
+                    file.sync_all().await?;
                     match image::open(&filename) {
                         Ok(image) => {
                             let hasher = img_hash::HasherConfig::new().to_hasher();
