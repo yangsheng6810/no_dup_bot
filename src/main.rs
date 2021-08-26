@@ -143,7 +143,7 @@ fn get_text(ctx: &UpdateWithCx<AutoSend<Bot>, Message>) -> Option<String> {
 
 fn get_filename() -> String {
     let duration = SystemTime::now().duration_since(UNIX_EPOCH).expect("Time went back");
-    let filename = format!("./{}.jpeg", duration.as_secs());
+    let filename = format!("./{}.jpeg", duration.as_millis());
     filename
 }
 
