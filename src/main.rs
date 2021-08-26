@@ -222,7 +222,7 @@ async fn insert_img_hash(img_db: Arc<Mutex<sled::Db>>, hash: String, key: Messag
 }
 
 async fn check_img_hash(img_db: Arc<Mutex<sled::Db>>, hash: String) -> Result<Option<MessageKey>> {
-    let similarity_threshold = 10u32;
+    let similarity_threshold = 8u32;
     let hash = ImageHash::from_base64(&hash).unwrap();
     let img_db = img_db.lock().await;
     let mut best_hash: Option<ImageHash> = None;
