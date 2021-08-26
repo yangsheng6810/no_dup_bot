@@ -14,6 +14,8 @@ use std::io::{Error, ErrorKind};
 use anyhow::Result;
 use img_hash::ImageHash;
 
+use chrono::{DateTime, Duration, Utc};
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MessageInfo {
     #[serde(with = "url_serde")]
@@ -35,6 +37,12 @@ pub struct MessageKey {
 pub struct ImageKey {
     chat_id: String,
     hash_str: String
+}
+
+#[derive(Debug, Clone, Hash, Serialize, Deserialize)]
+pub struct ImageValue {
+    message: MessageKey,
+    timestamp: DateTime<Utc>
 }
 
 impl PartialEq for MessageKey {
@@ -260,8 +268,13 @@ async fn insert_img_hash(img_db: &Arc<Mutex<sled::Db>>, hash: &str, chat_id: &st
         hash_str: String::from(hash),
     };
 
+    let img_value = ImageValue{
+        message: key.clone(),
+        timestamp: Utc::now()
+    };
+
     let serialized_k = serde_json::to_string(&img_key).unwrap();
-    let serialized_v = serde_json::to_string(&key).unwrap();
+    let serialized_v = serde_json::to_string(&img_value).unwrap();
 
     if img_db.insert(serialized_k.as_bytes(), serialized_v.as_bytes()).is_err() {
         println!("database seve error when saving key {:?} with value {:?}", &hash, &key);
@@ -294,6 +307,10 @@ async fn check_img_hash(img_db: &Arc<Mutex<sled::Db>>, hash: &str, chat_id: &str
     let similarity_threshold = 6u32;
     let hash = ImageHash::from_base64(&hash).unwrap();
     let img_db = img_db.lock().await;
+
+    let now = Utc::now();
+    let time_out_time = now.checked_sub_signed(Duration::days(10)).unwrap();
+
     let mut best_hash: Option<ImageHash> = None;
     let mut best_dist: Option<u32> = None;
     let mut best_url: Option<MessageKey> = None;
@@ -308,27 +325,37 @@ async fn check_img_hash(img_db: &Arc<Mutex<sled::Db>>, hash: &str, chat_id: &str
                 let img_key = serde_json::from_str::<ImageKey>(
                     &String::from_utf8(key.to_vec()).unwrap()).unwrap();
 
-                let value = serde_json::from_str::<MessageKey>(
+                let img_value = serde_json::from_str::<ImageValue>(
                     &String::from_utf8(value.to_vec()).unwrap()).unwrap();
+
+                let value = img_value.message;
 
                 let iter_chat_id = &img_key.chat_id;
                 let iter_hash = &img_key.hash_str;
 
-                if iter_chat_id.eq(&chat_id){
-                    // println!("Saw {:?} {:?}", &key, &value);
-                    let iter_hash = ImageHash::from_base64(&iter_hash).unwrap();
-                    let dist = iter_hash.dist(&hash);
-                    match best_dist {
-                        None => {
-                            best_hash = Some(iter_hash);
-                            best_dist = Some(dist);
-                            best_url = Some(value);
-                        },
-                        Some(old_dist) => {
-                            if dist < old_dist {
+                // remove items too old
+                if img_value.timestamp < time_out_time {
+                    match img_db.remove(&key){
+                        Ok(_) => {println!("Successfully removing old key {:?} from img_db", &img_key);},
+                        Err(e) => {println!("Error in removing old key {:?} from img_db: {:?}", &img_key, &e);}
+                    }
+                } else {
+                    if iter_chat_id.eq(&chat_id){
+                        // println!("Saw {:?} {:?}", &key, &value);
+                        let iter_hash = ImageHash::from_base64(&iter_hash).unwrap();
+                        let dist = iter_hash.dist(&hash);
+                        match best_dist {
+                            None => {
                                 best_hash = Some(iter_hash);
                                 best_dist = Some(dist);
                                 best_url = Some(value);
+                            },
+                            Some(old_dist) => {
+                                if dist < old_dist {
+                                    best_hash = Some(iter_hash);
+                                    best_dist = Some(dist);
+                                    best_url = Some(value);
+                                }
                             }
                         }
                     }
@@ -350,6 +377,50 @@ async fn check_img_hash(img_db: &Arc<Mutex<sled::Db>>, hash: &str, chat_id: &str
             Ok(None)
         }
     }
+}
+
+
+#[allow(dead_code)]
+async fn cleanup_img_db(img_db: &Arc<Mutex<sled::Db>>, chat_id: &str) -> Result<()> {
+    let img_db = img_db.lock().await;
+    let mut count = 0;
+    let now = Utc::now();
+    if let Some(time_out_time) = now.checked_sub_signed(Duration::days(10)) {
+        for ans in img_db.iter() {
+            ans.ok().map(
+                |(key, value)| {
+                    count += 1;
+                    // let key = sled_to_object::<String>(key);
+                    // let value = sled_to_object::<MessageKey>(value);
+
+                    let img_key = serde_json::from_str::<ImageKey>(
+                        &String::from_utf8(key.to_vec()).unwrap()).unwrap();
+
+                    let img_value = serde_json::from_str::<ImageValue>(
+                        &String::from_utf8(value.to_vec()).unwrap()).unwrap();
+
+                    let iter_chat_id = &img_key.chat_id;
+                    // let iter_hash = &img_key.hash_str;
+
+                    if iter_chat_id.eq(&chat_id){
+                        // remove items too old
+                        if img_value.timestamp < time_out_time {
+                            match img_db.remove(&key){
+                                Ok(_) => {
+                                    println!("Successfully removing {:?} from img_db", &img_key);
+                                },
+                                Err(e) => {
+                                    println!("Error in removing {:?} from img_db, error {:?}", &img_key, &e);
+                                }
+                            }
+                        }
+                    }
+                });
+        }
+    } else {
+        println!("Time parse failuer when cleaning up db!");
+    }
+    Ok(())
 }
 
 async fn parse_message(

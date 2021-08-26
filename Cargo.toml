@@ -21,3 +21,4 @@ sled = "0.34.6"
 img_hash = "3.2.0"
 image = "0.23.14"
 anyhow = "1.0.43"
+chrono = { version = "0.4.19", features = ["serde"] }
