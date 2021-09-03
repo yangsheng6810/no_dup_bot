@@ -158,6 +158,35 @@ fn remove_file(filename: &str) {
         .err().map(|e| println!("Unable to delete file {:?}", e));
 }
 
+fn filter_url(ctx: &UpdateWithCx<AutoSend<Bot>, Message>, url: Option<Url>) -> Option<Url> {
+    let url = url?;
+    let mut filtered_out = false;
+
+    let chat_id = get_chat_id(&ctx);
+    if let Some(domain) = url.domain() {
+        println!("domain is {}", domain);
+        if domain == "t.me"{
+            if let Some(mut path_segments) = url.path_segments(){
+                // this is the /c/ part
+                path_segments.next();
+                let url_chat_id = path_segments.next();
+                // let url_message_id = path_segments.next();
+
+                if let Some(message_chat_id) = url_chat_id  {
+                    if message_chat_id == chat_id {
+                        filtered_out = true;
+                        println!("Url {} gets filtered out with chat id {}", url, message_chat_id);
+                    }
+                }
+            }
+        }
+    }
+    match filtered_out {
+        true => None,
+        false => Some(url)
+    }
+}
+
 async fn get_hash(ctx: &UpdateWithCx<AutoSend<Bot>, Message>, img_to_download: &PhotoSize) -> Result<Option<String>>{
     let filename = get_filename();
     let TgFile { file_path, .. } = ctx.requester.get_file(&img_to_download.file_id).send().await?;
@@ -400,6 +429,7 @@ async fn parse_message(
             if url.is_none(){
                 println!("Non-forwarded message link parse failure.")
             }
+            url = filter_url(&ctx, url);
         }
     }
     if let Some(url) = url {
