@@ -11,6 +11,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use std::io::{Error, ErrorKind};
 
 use anyhow::Result;
+use img_hash::ImageHash;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MessageInfo {
@@ -26,6 +27,12 @@ pub struct MessageKey {
     chat_id: String,
     #[serde(with = "url_serde")]
     url: Url
+}
+
+#[derive(Debug, Clone, Hash, Serialize, Deserialize)]
+pub struct ImageKey {
+    chat_id: String,
+    hash_str: String
 }
 
 impl PartialEq for MessageKey {
@@ -142,13 +149,42 @@ fn get_text(ctx: &UpdateWithCx<AutoSend<Bot>, Message>) -> Option<String> {
 
 fn get_filename() -> String {
     let duration = SystemTime::now().duration_since(UNIX_EPOCH).expect("Time went back");
-    let filename = format!("./{}.jpeg", duration.as_secs());
+    let filename = format!("./{}.jpeg", duration.as_millis());
     filename
 }
 
 fn remove_file(filename: &str) {
     std::fs::remove_file(filename)
         .err().map(|e| println!("Unable to delete file {:?}", e));
+}
+
+fn filter_url(ctx: &UpdateWithCx<AutoSend<Bot>, Message>, url: Option<Url>) -> Option<Url> {
+    let url = url?;
+    let mut filtered_out = false;
+
+    let chat_id = get_chat_id(&ctx);
+    if let Some(domain) = url.domain() {
+        println!("domain is {}", domain);
+        if domain == "t.me"{
+            if let Some(mut path_segments) = url.path_segments(){
+                // this is the /c/ part
+                path_segments.next();
+                let url_chat_id = path_segments.next();
+                // let url_message_id = path_segments.next();
+
+                if let Some(message_chat_id) = url_chat_id  {
+                    if message_chat_id == chat_id {
+                        filtered_out = true;
+                        println!("Url {} gets filtered out with chat id {}", url, message_chat_id);
+                    }
+                }
+            }
+        }
+    }
+    match filtered_out {
+        true => None,
+        false => Some(url)
+    }
 }
 
 async fn get_hash(ctx: &UpdateWithCx<AutoSend<Bot>, Message>, img_to_download: &PhotoSize) -> Result<Option<String>>{
@@ -160,6 +196,7 @@ async fn get_hash(ctx: &UpdateWithCx<AutoSend<Bot>, Message>, img_to_download: &
                 Ok(x) => {
                     dbg!(x);
                     println!("Download success to file {:?}", file);
+                    file.sync_all().await?;
                     match image::open(&filename) {
                         Ok(image) => {
                             let hasher = img_hash::HasherConfig::new().to_hasher();
@@ -169,7 +206,8 @@ async fn get_hash(ctx: &UpdateWithCx<AutoSend<Bot>, Message>, img_to_download: &
                         },
                         Err(e) => {
                             println!("Failed to re-read file, {:?}", e);
-                            remove_file(&filename);
+                            // Temporarily disable file remove for debug purpose
+                            // remove_file(&filename);
                             Ok(None)
                         }
                     }
@@ -189,8 +227,126 @@ async fn get_hash(ctx: &UpdateWithCx<AutoSend<Bot>, Message>, img_to_download: &
     }
 }
 
-async fn parse_message(ctx: &UpdateWithCx<AutoSend<Bot>, Message>,
-                 db: Arc<Mutex<MyDB>>) -> Result<()> {
+// fn sled_to_object<'a, T>(value: sled::IVec) -> T
+// where
+//     T: Deserialize<'a>
+// {
+//     serde_json::from_str::<T>(&String::from_utf8(value.to_vec()).unwrap()).unwrap()
+// }
+
+#[allow(dead_code)]
+fn object_to_sled<T>(ss: T) -> sled::IVec
+where
+    T: Serialize
+{
+    sled::IVec::from(serde_json::to_string(&ss).unwrap().as_bytes())
+}
+
+async fn insert_img_hash(img_db: &Arc<Mutex<sled::Db>>, hash: &str, chat_id: &str, key: &MessageKey) -> bool {
+    let img_db = img_db.lock().await;
+
+    let img_key = ImageKey{
+        chat_id: String::from(chat_id),
+        hash_str: String::from(hash),
+    };
+
+    let serialized_k = serde_json::to_string(&img_key).unwrap();
+    let serialized_v = serde_json::to_string(&key).unwrap();
+
+    if img_db.insert(serialized_k.as_bytes(), serialized_v.as_bytes()).is_err() {
+        println!("database seve error when saving key {:?} with value {:?}", &hash, &key);
+        false
+    } else {
+        true
+    }
+}
+
+async fn contains_img_hash(img_db: &Arc<Mutex<sled::Db>>, hash: &str, chat_id: &str) -> bool {
+    let img_db = img_db.lock().await;
+
+    let img_key = ImageKey{
+        chat_id: String::from(chat_id),
+        hash_str: String::from(hash),
+    };
+
+    let serialized_k = serde_json::to_string(&img_key).unwrap();
+
+    if img_db.contains_key(serialized_k.as_bytes()).is_err() {
+        println!("database seve error when looking for key {:?}", &img_key);
+        false
+    } else {
+        true
+    }
+}
+
+// also deletes old img_db entries
+async fn check_img_hash(img_db: &Arc<Mutex<sled::Db>>, hash: &str, chat_id: &str) -> Result<Option<MessageKey>> {
+    let similarity_threshold = 6u32;
+    let hash = ImageHash::from_base64(&hash).unwrap();
+    let img_db = img_db.lock().await;
+    let mut best_hash: Option<ImageHash> = None;
+    let mut best_dist: Option<u32> = None;
+    let mut best_url: Option<MessageKey> = None;
+    let mut count = 0;
+    for ans in img_db.iter() {
+        ans.ok().map(
+            |(key, value)| {
+                count += 1;
+                // let key = sled_to_object::<String>(key);
+                // let value = sled_to_object::<MessageKey>(value);
+
+                let img_key = serde_json::from_str::<ImageKey>(
+                    &String::from_utf8(key.to_vec()).unwrap()).unwrap();
+
+                let value = serde_json::from_str::<MessageKey>(
+                    &String::from_utf8(value.to_vec()).unwrap()).unwrap();
+
+                let iter_chat_id = &img_key.chat_id;
+                let iter_hash = &img_key.hash_str;
+
+                if iter_chat_id.eq(&chat_id){
+                    // println!("Saw {:?} {:?}", &key, &value);
+                    let iter_hash = ImageHash::from_base64(&iter_hash).unwrap();
+                    let dist = iter_hash.dist(&hash);
+                    match best_dist {
+                        None => {
+                            best_hash = Some(iter_hash);
+                            best_dist = Some(dist);
+                            best_url = Some(value);
+                        },
+                        Some(old_dist) => {
+                            if dist < old_dist {
+                                best_hash = Some(iter_hash);
+                                best_dist = Some(dist);
+                                best_url = Some(value);
+                            }
+                        }
+                    }
+                }
+            });
+    }
+    match best_dist {
+        Some(dist) => {
+            println!("The best distance is {} among all {} entries", dist, count);
+            if dist < similarity_threshold {
+                best_hash.map(|h| println!("Use this hash! {:?}", h.to_base64()));
+                best_url.as_ref().map(|u| println!("with url {:?}", u));
+                Ok(best_url)
+            } else {
+                Ok(None)
+            }
+        },
+        None => {
+            Ok(None)
+        }
+    }
+}
+
+async fn parse_message(
+    ctx: &UpdateWithCx<AutoSend<Bot>, Message>,
+    db: Arc<Mutex<MyDB>>,
+    img_db: Arc<Mutex<sled::Db>>
+) -> Result<()> {
     let mut url: Option<Url>;
     let link = get_msg_link(&ctx);
     let chat_id = get_chat_id(&ctx);
@@ -235,8 +391,27 @@ async fn parse_message(ctx: &UpdateWithCx<AutoSend<Bot>, Message>,
             if let Some(img) = img_to_download {
                 match get_hash(&ctx, &img).await {
                     Ok(Some(hash)) => {
-                        url = Url::parse(&format!("https://img.telegram.com/{}", &hash)).ok();
-                        println!("Get hash {}", hash);
+                        println!("Get hash {}", &hash);
+                        match check_img_hash(&img_db, &hash, &chat_id).await {
+                            Ok(Some(key)) => {
+                                println!("Found existing hash {:?} that is close", key.url);
+                                url = Some(key.url.clone());
+                            },
+                            _ => {
+                                println!("No close hash is found, use original hash {:?}", &hash);
+                                url = Url::parse(&format!("https://img.telegram.com/{}", hash.clone())).ok();
+                            }
+                        }
+                        // insert the new hash result into img_db, unless an exact key exist.
+                        if let Some(url) = url.clone() {
+                            if contains_img_hash(&img_db, &hash, &chat_id).await {
+                                let key = MessageKey{chat_id: chat_id.clone(), url:url.clone()};
+                                let ans = insert_img_hash(&img_db, &hash, &chat_id, &key).await;
+                                if ! ans {
+                                    println!("insert error, with hash {:?} and key {:?}", &hash, &key);
+                                }
+                            }
+                        }
                     },
                     Ok(None) => {
                         println!("Failed to get hash");
@@ -254,6 +429,7 @@ async fn parse_message(ctx: &UpdateWithCx<AutoSend<Bot>, Message>,
             if url.is_none(){
                 println!("Non-forwarded message link parse failure.")
             }
+            url = filter_url(&ctx, url);
         }
     }
     if let Some(url) = url {
@@ -317,7 +493,8 @@ fn need_handle(ctx: &UpdateWithCx<AutoSend<Bot>, Message>) -> bool {
         || is_image(&ctx)
 }
 
-async fn run(db: Arc<Mutex<MyDB>>) {
+async fn run(db: Arc<Mutex<MyDB>>,
+             img_db: Arc<Mutex<sled::Db>>) {
     teloxide::enable_logging!();
     log::info!("Starting simple_commands_bot...");
 
@@ -326,12 +503,13 @@ async fn run(db: Arc<Mutex<MyDB>>) {
     let db = db.clone();
     teloxide::repl(bot, move |ctx| {
         let db = db.clone();
+        let img_db = img_db.clone();
         async move {
             if need_handle(&ctx) {
                 // TODO: think of a better way to do it.
                 // Currently decided to suppress this error.
                 // teloxide seem to want a RequestError, while we would want a general Error
-                parse_message(&ctx, db).await.err().map(
+                parse_message(&ctx, db, img_db).await.err().map(
                     |e|
                     println!("parse_message see error {:?}", e)
                 );
@@ -345,5 +523,6 @@ async fn run(db: Arc<Mutex<MyDB>>) {
 #[tokio::main]
 async fn main() {
     let db = Arc::new(Mutex::new(MyDB::init("bot_db")));
-    run(db.clone()).await;
+    let img_db = Arc::new(Mutex::new(sled::open("img_db").unwrap()));
+    run(db.clone(), img_db.clone()).await;
 }
