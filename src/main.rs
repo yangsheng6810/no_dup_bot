@@ -20,6 +20,7 @@ pub struct MessageInfo {
     count: u32,
     #[serde(with = "url_serde")]
     link: Option<Url>,
+    user_id: Option<i64>,
 }
 
 #[derive(Debug, Clone, Hash, Serialize, Deserialize)]
@@ -359,6 +360,7 @@ async fn parse_message(
     let mut url: Option<Url>;
     let link = get_msg_link(&ctx);
     let chat_id = get_chat_id(&ctx);
+    let user_id = ctx.update.from().map_or(None, |u| Some(u.id));
 
     match (is_forward(&ctx), is_image(&ctx)) {
         (true, false) => {
@@ -460,7 +462,7 @@ async fn parse_message(
             ctx.reply_to(final_msg).await?;
         } else {
             // has not seen this message before
-            let value = MessageInfo{url, count:1, link};
+            let value = MessageInfo{url, count:1, link, user_id};
             db.save(&key, &value);
         };
     } else {
