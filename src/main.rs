@@ -167,16 +167,25 @@ fn filter_url(ctx: &UpdateWithCx<AutoSend<Bot>, Message>, url: Option<Url>) -> O
         println!("domain is {}", domain);
         if domain == "t.me"{
             if let Some(mut path_segments) = url.path_segments(){
-                // this is the /c/ part
-                path_segments.next();
-                let url_chat_id = path_segments.next();
-                // let url_message_id = path_segments.next();
+                match path_segments.next() {
+                    // filter out url link to messages in the current chat
+                    Some("c") => {
+                        let url_chat_id = path_segments.next();
+                        // let url_message_id = path_segments.next();
 
-                if let Some(message_chat_id) = url_chat_id  {
-                    if message_chat_id == chat_id {
+                        if let Some(message_chat_id) = url_chat_id  {
+                            if message_chat_id == chat_id {
+                                filtered_out = true;
+                                println!("Url {} gets filtered out with chat id {}", url, message_chat_id);
+                            }
+                        }
+                    },
+                    // filter out joinchat messages
+                    Some("joinchat") => {
+                        println!("Url {} gets filtered out since it is a joinchat", url);
                         filtered_out = true;
-                        println!("Url {} gets filtered out with chat id {}", url, message_chat_id);
-                    }
+                    },
+                    _ => {}
                 }
             }
         }
