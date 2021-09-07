@@ -1,4 +1,5 @@
 use teloxide::{prelude::*, net::Download, types::File as TgFile, types::PhotoSize};
+use teloxide::{RequestError, ApiError};
 use tokio::fs::File;
 
 use std::sync::Arc;
@@ -203,9 +204,8 @@ async fn get_hash(ctx: &UpdateWithCx<AutoSend<Bot>, Message>, img_to_download: &
     match File::create(&filename).await {
         Ok(mut file) => {
             match ctx.requester.download_file(&file_path, &mut file).await {
-                Ok(x) => {
-                    dbg!(x);
-                    println!("Download success to file {:?}", file);
+                Ok(()) => {
+                    // println!("Download success to file {:?}", file);
                     file.sync_all().await?;
                     match image::open(&filename) {
                         Ok(image) => {
@@ -361,6 +361,7 @@ async fn parse_message(
     let link = get_msg_link(&ctx);
     let chat_id = get_chat_id(&ctx);
     let user_id = ctx.update.from().map_or(None, |u| Some(u.id));
+    let msg_id = ctx.update.id;
 
     match (is_forward(&ctx), is_image(&ctx)) {
         (true, false) => {
@@ -443,8 +444,9 @@ async fn parse_message(
             url = filter_url(&ctx, url);
         }
     }
+    let mut my_msg_id: Option<i32> = None;
     if let Some(url) = url {
-        let key = MessageKey{chat_id, url:url.clone()};
+        let key = MessageKey{chat_id: chat_id.clone(), url:url.clone()};
         let db = db.lock().await;
         if let Some(info) = db.find(&key){
             let mut info = info.clone();
@@ -459,7 +461,9 @@ async fn parse_message(
             // ctx.answer(&link_msg).await?;
             let final_msg = format!("你火星了！这条消息是第{}次来到本群了，快去爬楼。{}", info.count, link_msg);
             println!("{}", &final_msg);
-            ctx.reply_to(final_msg).await?;
+            if let Ok(msg) = ctx.reply_to(final_msg).await {
+                my_msg_id = Some(msg.id);
+            }
         } else {
             // has not seen this message before
             let value = MessageInfo{url, count:1, link, user_id};
@@ -468,7 +472,44 @@ async fn parse_message(
     } else {
         get_text(&ctx).map(|text| println!("Pong, {}", text));
     }
+    // delete my message if the message we replied to gets deleted
+    if let Some(my_msg_id) = my_msg_id {
+        delete_final_msg_accordingly(&ctx, chat_id.clone(), msg_id, my_msg_id).await;
+    }
     Ok(())
+}
+
+async fn delete_final_msg_accordingly(ctx: &UpdateWithCx<AutoSend<Bot>, Message>, chat_id: String, msg_id: i32, my_msg_id: i32) -> bool{
+    let check_wait_duration = tokio::time::Duration::from_secs(30);
+    tokio::time::sleep(check_wait_duration).await;
+
+    match ctx.requester.forward_message(chat_id.clone(), chat_id.clone(), msg_id).await {
+        Ok(msg) => {
+            // // message was not deleted
+            // println!("Get msg {:?}", &msg);
+            // println!("Message was not deleted, delete the new forward");
+            if let Err(e) = ctx.requester.delete_message(chat_id.clone(), msg.id).await {
+                println!("Delete failed with error {:?}", e);
+            };
+        },
+        Err(e) => {
+            // unknown error
+            println!("Received un-detected error {:?}", &e);
+             match e {
+                 RequestError::ApiError{kind, status_code:_}
+                 if kind == ApiError::MessageToForwardNotFound => {
+                    println!("Message was deleted, also delete the notification");
+                },
+                _ => {
+                    println!("Some other error detected: {:?}", e);
+                }
+            }
+            if let Err(e) =  ctx.requester.delete_message(chat_id.clone(), my_msg_id).await {
+                println!("Clean up failed with error {:?}", e);
+            };
+        }
+    }
+    true
 }
 
 
