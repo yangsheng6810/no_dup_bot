@@ -359,7 +359,7 @@ async fn parse_message(
 ) -> Result<()> {
     let mut url: Option<Url>;
     let link = get_msg_link(&ctx);
-    let chat_id = get_chat_id(&ctx);
+    let clean_chat_id = get_chat_id(&ctx);
     let user_id = ctx.update.from().map_or(None, |u| Some(u.id));
     let msg_id = ctx.update.id;
 
@@ -404,7 +404,7 @@ async fn parse_message(
                 match get_hash(&ctx, &img).await {
                     Ok(Some(hash)) => {
                         println!("Get hash {}", &hash);
-                        match check_img_hash(&img_db, &hash, &chat_id).await {
+                        match check_img_hash(&img_db, &hash, &clean_chat_id).await {
                             Ok(Some(key)) => {
                                 println!("Found existing hash {:?} that is close", key.url);
                                 url = Some(key.url.clone());
@@ -416,9 +416,9 @@ async fn parse_message(
                         }
                         // insert the new hash result into img_db, unless an exact key exist.
                         if let Some(url) = url.clone() {
-                            if contains_img_hash(&img_db, &hash, &chat_id).await {
-                                let key = MessageKey{chat_id: chat_id.clone(), url:url.clone()};
-                                let ans = insert_img_hash(&img_db, &hash, &chat_id, &key).await;
+                            if contains_img_hash(&img_db, &hash, &clean_chat_id).await {
+                                let key = MessageKey{chat_id: clean_chat_id.clone(), url:url.clone()};
+                                let ans = insert_img_hash(&img_db, &hash, &clean_chat_id, &key).await;
                                 if ! ans {
                                     println!("insert error, with hash {:?} and key {:?}", &hash, &key);
                                 }
@@ -446,7 +446,7 @@ async fn parse_message(
     }
     let mut my_msg_id: Option<i32> = None;
     if let Some(url) = url {
-        let key = MessageKey{chat_id: chat_id.clone(), url:url.clone()};
+        let key = MessageKey{chat_id: clean_chat_id.clone(), url:url.clone()};
         let db = db.lock().await;
         if let Some(info) = db.find(&key){
             let mut info = info.clone();
@@ -474,38 +474,40 @@ async fn parse_message(
     }
     // delete my message if the message we replied to gets deleted
     if let Some(my_msg_id) = my_msg_id {
-        delete_final_msg_accordingly(&ctx, chat_id.clone(), msg_id, my_msg_id).await;
+        let raw_chat_id = ctx.update.chat_id();
+        delete_final_msg_accordingly(&ctx, raw_chat_id, msg_id, my_msg_id).await;
     }
     Ok(())
 }
 
-async fn delete_final_msg_accordingly(ctx: &UpdateWithCx<AutoSend<Bot>, Message>, chat_id: String, msg_id: i32, my_msg_id: i32) -> bool{
+async fn delete_final_msg_accordingly(ctx: &UpdateWithCx<AutoSend<Bot>, Message>, chat_id: i64, msg_id: i32, my_msg_id: i32) -> bool{
     let check_wait_duration = tokio::time::Duration::from_secs(30);
     tokio::time::sleep(check_wait_duration).await;
 
-    match ctx.requester.forward_message(chat_id.clone(), chat_id.clone(), msg_id).await {
+    match ctx.requester.forward_message(chat_id, chat_id, msg_id).await {
         Ok(msg) => {
             // // message was not deleted
             // println!("Get msg {:?}", &msg);
             // println!("Message was not deleted, delete the new forward");
-            if let Err(e) = ctx.requester.delete_message(chat_id.clone(), msg.id).await {
+            if let Err(e) = ctx.requester.delete_message(chat_id, msg.id).await {
                 println!("Delete failed with error {:?}", e);
             };
         },
         Err(e) => {
             // unknown error
-            println!("Received un-detected error {:?}", &e);
+            println!("The attempt to forward the message failed");
              match e {
                  RequestError::ApiError{kind, status_code:_}
-                 if kind == ApiError::MessageToForwardNotFound => {
-                    println!("Message was deleted, also delete the notification");
+                 if kind == ApiError::MessageToForwardNotFound ||
+                     kind == ApiError::MessageIdInvalid => {
+                    println!("The message was deleted, so we also delete our notification");
                 },
                 _ => {
                     println!("Some other error detected: {:?}", e);
                 }
             }
-            if let Err(e) =  ctx.requester.delete_message(chat_id.clone(), my_msg_id).await {
-                println!("Clean up failed with error {:?}", e);
+            if let Err(e) =  ctx.requester.delete_message(chat_id, my_msg_id).await {
+                println!("Clean up chat {} message {} failed with error {:?}", chat_id, my_msg_id, e);
             };
         }
     }
