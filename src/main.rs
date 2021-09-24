@@ -293,12 +293,21 @@ async fn contains_img_hash(img_db: &Arc<Mutex<sled::Db>>, hash: &str, chat_id: &
 async fn check_img_hash(img_db: &Arc<Mutex<sled::Db>>, hash: &str, chat_id: &str) -> Result<Option<MessageKey>> {
     let similarity_threshold = 6u32;
     let hash = ImageHash::from_base64(&hash).unwrap();
+
+    // prepare an empty key so we can limit search on images from the same chat
+    let empty_key = ImageKey{chat_id: String::from(chat_id), hash_str: String::from("")};
+    let empty_key_str = serde_json::to_string(&empty_key).unwrap();
+    // the number 20 is kind of arbitrary, but seems enough to capture the first
+    // few bytes in the hash
+    let prefix = &empty_key_str.as_bytes()[0..20];
+
     let img_db = img_db.lock().await;
     let mut best_hash: Option<ImageHash> = None;
     let mut best_dist: Option<u32> = None;
     let mut best_url: Option<MessageKey> = None;
     let mut count = 0;
-    for ans in img_db.iter() {
+
+    for ans in img_db.scan_prefix(prefix) {
         ans.ok().map(
             |(key, value)| {
                 count += 1;
@@ -314,6 +323,7 @@ async fn check_img_hash(img_db: &Arc<Mutex<sled::Db>>, hash: &str, chat_id: &str
                 let iter_chat_id = &img_key.chat_id;
                 let iter_hash = &img_key.hash_str;
 
+                // We still need this test, as the prefix may not be perfect
                 if iter_chat_id.eq(&chat_id){
                     // println!("Saw {:?} {:?}", &key, &value);
                     let iter_hash = ImageHash::from_base64(&iter_hash).unwrap();
