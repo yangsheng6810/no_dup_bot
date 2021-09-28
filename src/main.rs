@@ -451,9 +451,12 @@ async fn parse_message(
                 }
             }
             if let Some(img) = img_to_download {
+                let mut old_hash = None;
+                let mut new_hash = None;
                 match get_hash(&ctx, &img).await {
                     Ok(Some(hash)) => {
                         println!("Get hash {}", &hash);
+                        old_hash = Some(hash.clone());
                         match check_img_hash(&img_db, &hash, &clean_chat_id).await {
                             Ok(Some(key)) => {
                                 println!("Found existing hash {:?} that is close", key.url);
@@ -482,6 +485,22 @@ async fn parse_message(
                         println!("Get hash error {:?}", e);
                     }
                 };
+                // for debug
+                match get_hash_new(&ctx, &img).await {
+                    Ok(Some(hash)) => {
+                        new_hash = Some(hash);
+                    },
+                    Ok(None) => {
+                        println!("Failed to get hash");
+                    },
+                    Err(e) => {
+                        println!("get_hash_new has error {:?}", e)
+                    }
+                };
+                if old_hash != new_hash {
+                    println!("================================");
+                    println!("Hash mismatch!! Old hash {:?}, new hash {:?}", old_hash, new_hash)
+                }
             }
         },
         (false, false) => {
