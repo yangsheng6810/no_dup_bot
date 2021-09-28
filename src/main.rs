@@ -13,6 +13,8 @@ use std::io::{Error, ErrorKind};
 
 use anyhow::Result;
 use img_hash::ImageHash;
+// use bytes::{Bytes, BytesMut, Buf, BufMut};
+use bytes::BufMut;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MessageInfo {
@@ -195,6 +197,44 @@ fn filter_url(ctx: &UpdateWithCx<AutoSend<Bot>, Message>, url: Option<Url>) -> O
     match filtered_out {
         true => None,
         false => Some(url)
+    }
+}
+
+async fn get_hash_new(ctx: &UpdateWithCx<AutoSend<Bot>, Message>, img_to_download: &PhotoSize) -> Result<Option<String>>{
+    let TgFile { file_path, .. } = ctx.requester.get_file(&img_to_download.file_id).send().await?;
+    let ss = ctx.requester.download_file_stream(&file_path);
+    let l = ss.collect::<Vec<_>>().await;
+    let mut count = 0;
+    let mut buf = vec![];
+    let mut found_error = false;
+    for ii in l {
+        match ii {
+            Ok(b) => {
+                count += 1;
+                buf.put(b);
+            }
+            Err(e) => {
+                dbg!(e);
+                found_error = true;
+            }
+        }
+    }
+    println!("count is {:?}", count);
+    if found_error {
+        println!("found error!");
+        Ok(None)
+    } else {
+        match image::load_from_memory(&buf) {
+            Ok(img) => {
+                let hasher = img_hash::HasherConfig::new().to_hasher();
+                let hash = Some(hasher.hash_image(&img).to_base64());
+                Ok(hash)
+            },
+            Err(e) => {
+                println!("Failed to parse image: {:?}", &e);
+                Ok(None)
+            }
+        }
     }
 }
 
