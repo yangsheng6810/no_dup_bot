@@ -166,7 +166,7 @@ fn filter_url(ctx: &UpdateWithCx<AutoSend<Bot>, Message>, url: Option<Url>) -> O
 
     let chat_id = get_chat_id(&ctx);
     if let Some(domain) = url.domain() {
-        println!("domain is {}", domain);
+        // println!("domain is {}", domain);
         if domain == "t.me"{
             if let Some(mut path_segments) = url.path_segments(){
                 match path_segments.next() {
