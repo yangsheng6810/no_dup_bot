@@ -204,13 +204,13 @@ async fn get_hash_new(ctx: &UpdateWithCx<AutoSend<Bot>, Message>, img_to_downloa
     let TgFile { file_path, .. } = ctx.requester.get_file(&img_to_download.file_id).send().await?;
     let ss = ctx.requester.download_file_stream(&file_path);
     let l = ss.collect::<Vec<_>>().await;
-    let mut count = 0;
+    // let mut count = 0;
     let mut buf = vec![];
     let mut found_error = false;
     for ii in l {
         match ii {
             Ok(b) => {
-                count += 1;
+                // count += 1;
                 buf.put(b);
             }
             Err(e) => {
@@ -219,9 +219,9 @@ async fn get_hash_new(ctx: &UpdateWithCx<AutoSend<Bot>, Message>, img_to_downloa
             }
         }
     }
-    println!("count is {:?}", count);
+    // println!("count is {:?}", count);
     if found_error {
-        println!("found error!");
+        println!("Image download error! {:?}", &img_to_download);
         Ok(None)
     } else {
         match image::load_from_memory(&buf) {
@@ -453,10 +453,10 @@ async fn parse_message(
             if let Some(img) = img_to_download {
                 let mut old_hash = None;
                 let mut new_hash = None;
-                match get_hash(&ctx, &img).await {
+                match get_hash_new(&ctx, &img).await {
                     Ok(Some(hash)) => {
                         println!("Get hash {}", &hash);
-                        old_hash = Some(hash.clone());
+                        new_hash = Some(hash.clone());
                         match check_img_hash(&img_db, &hash, &clean_chat_id).await {
                             Ok(Some(key)) => {
                                 println!("Found existing hash {:?} that is close", key.url);
@@ -486,9 +486,9 @@ async fn parse_message(
                     }
                 };
                 // for debug
-                match get_hash_new(&ctx, &img).await {
+                match get_hash(&ctx, &img).await {
                     Ok(Some(hash)) => {
-                        new_hash = Some(hash);
+                        old_hash = Some(hash);
                     },
                     Ok(None) => {
                         println!("Failed to get hash");
