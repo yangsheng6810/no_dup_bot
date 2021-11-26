@@ -321,11 +321,12 @@ async fn contains_img_hash(img_db: &Arc<Mutex<sled::Db>>, hash: &str, chat_id: &
 
     let serialized_k = serde_json::to_string(&img_key).unwrap();
 
-    if img_db.contains_key(serialized_k.as_bytes()).is_err() {
-        println!("database seve error when looking for key {:?}", &img_key);
-        false
-    } else {
-        true
+    match img_db.contains_key(serialized_k.as_bytes()) {
+        Err(_) => {
+            println!("database seve error when looking for key {:?}", &img_key);
+            false
+        },
+        Ok(ans) => ans
     }
 }
 
@@ -470,7 +471,7 @@ async fn parse_message(
                         }
                         // insert the new hash result into img_db, unless an exact key exist.
                         if let Some(url) = url.clone() {
-                            if contains_img_hash(&img_db, &hash, &clean_chat_id).await {
+                            if !contains_img_hash(&img_db, &hash, &clean_chat_id).await {
                                 let key = MessageKey{chat_id: clean_chat_id.clone(), url:url.clone()};
                                 let ans = insert_img_hash(&img_db, &hash, &clean_chat_id, &key).await;
                                 if ! ans {
