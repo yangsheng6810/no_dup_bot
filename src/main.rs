@@ -404,10 +404,41 @@ async fn check_img_hash(img_db: &Arc<Mutex<sled::Db>>, hash: &str, chat_id: &str
     }
 }
 
+
+async fn update_top_board(top_db: &Arc<Mutex<sled::Db>>, user_id: &Option<i64>){
+    let top_db = top_db.lock().await;
+
+    if let Some(user_id) = user_id {
+        let key = serde_json::to_string(user_id).unwrap();
+
+        match top_db.get(key.as_bytes()) {
+            Err(e) => {
+                println!("top board database seve error {:?} when looking for key {:?}", &e, &key);
+            },
+            Ok(value) => {
+                let mut previous_value: i64 = 0;
+                if let Some(value) = value {
+                    let value = String::from_utf8(value.to_vec()).unwrap();
+                    println!("In top db, finding '{:?}' returns '{}'", &key, &value);
+                    previous_value = serde_json::from_str(&value).unwrap();
+                }
+
+                let value = previous_value + 1;
+                let value = serde_json::to_string(&value).unwrap();
+
+                if let Err(e) = top_db.insert(key.as_bytes(), value.as_bytes()) {
+                    println!("database seve error {:?} when saving key {:?} with value {:?}", &e, &key, &value);
+                }
+            }
+        }
+    }
+}
+
 async fn parse_message(
     ctx: &UpdateWithCx<AutoSend<Bot>, Message>,
     db: Arc<Mutex<MyDB>>,
-    img_db: Arc<Mutex<sled::Db>>
+    img_db: Arc<Mutex<sled::Db>>,
+    top_db: Arc<Mutex<sled::Db>>
 ) -> Result<()> {
     let mut url: Option<Url>;
     let link = get_msg_link(&ctx);
@@ -524,6 +555,7 @@ async fn parse_message(
             // has seen this message before
             info.count += 1;
             db.save(&key, &info);
+            update_top_board(&top_db, &user_id);
             // ctx.answer(format!("See it {} times", info.count)).await?;
             println!("See it {} times", info.count);
             let link_msg = &info.link.map_or(
@@ -619,7 +651,8 @@ fn need_handle(ctx: &UpdateWithCx<AutoSend<Bot>, Message>) -> bool {
 }
 
 async fn run(db: Arc<Mutex<MyDB>>,
-             img_db: Arc<Mutex<sled::Db>>) {
+             img_db: Arc<Mutex<sled::Db>>,
+             top_db: Arc<Mutex<sled::Db>>) {
     teloxide::enable_logging!();
     log::info!("Starting simple_commands_bot...");
 
@@ -629,12 +662,13 @@ async fn run(db: Arc<Mutex<MyDB>>,
     teloxide::repl(bot, move |ctx| {
         let db = db.clone();
         let img_db = img_db.clone();
+        let top_db = top_db.clone();
         async move {
             if need_handle(&ctx) {
                 // TODO: think of a better way to do it.
                 // Currently decided to suppress this error.
                 // teloxide seem to want a RequestError, while we would want a general Error
-                parse_message(&ctx, db, img_db).await.err().map(
+                parse_message(&ctx, db, img_db, top_db).await.err().map(
                     |e|
                     println!("parse_message see error {:?}", e)
                 );
@@ -649,5 +683,6 @@ async fn run(db: Arc<Mutex<MyDB>>,
 async fn main() {
     let db = Arc::new(Mutex::new(MyDB::init("bot_db")));
     let img_db = Arc::new(Mutex::new(sled::open("img_db").unwrap()));
-    run(db.clone(), img_db.clone()).await;
+    let top_db = Arc::new(Mutex::new(sled::open("top_db").unwrap()));
+    run(db.clone(), img_db.clone(), top_db.clone()).await;
 }
