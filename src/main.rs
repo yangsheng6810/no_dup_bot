@@ -1,6 +1,7 @@
-use teloxide::{prelude::*, net::Download, types::File as TgFile, types::PhotoSize};
+use teloxide::{prelude::*, net::Download, types::File as TgFile, types::PhotoSize, RequestError};
 use teloxide::{RequestError, ApiError};
 use tokio::fs::File;
+use teloxide::utils::command::BotCommand;
 
 use std::sync::Arc;
 use tokio::sync::Mutex;
@@ -15,6 +16,78 @@ use anyhow::Result;
 use img_hash::ImageHash;
 // use bytes::{Bytes, BytesMut, Buf, BufMut};
 use bytes::BufMut;
+
+
+#[derive(BotCommand)]
+#[command(rename = "lowercase", description = "These commands are supported:")]
+enum Command {
+    #[command(description = "Get help")]
+    Help,
+    // #[command(description = "Reply to a bot message to delete it")]
+    // Delete,
+    #[command(description = "Show most duplicated messages (WIP)")]
+    Top,
+}
+
+// returns true if we can get where this message is from, and it matches the
+// author of the message that our bot answered
+//
+// Due to limitation of Telegram API, we can only go one hop for replied
+// message, but no more. Therefore, we can not achieve this
+#[allow(dead_code)]
+fn come_from_original_author(cx: &UpdateWithCx<AutoSend<Bot>, Message>) -> bool {
+    if let Some(this_message_from) = cx.update.from() {
+        dbg!(this_message_from);
+        if let Some(message) = cx.update.reply_to_message() {
+            dbg!(message);
+            if let Some(first_message) = message.reply_to_message() {
+                dbg!(first_message);
+                if let Some(original_from) = first_message.from(){
+                    dbg!(original_from);
+                    if original_from.id == this_message_from.id {
+                        return true
+                    }
+                }
+            }
+        }
+    }
+    // TODO: should return false, but we can not reliably detect come from
+    // original author, so we temporarily always return true
+    true
+}
+
+// Delete the replied message
+#[allow(dead_code)]
+async fn delete_replied_msg(cx: &UpdateWithCx<AutoSend<Bot>, Message>,
+                            with_bot_name: bool)
+                            -> Result<(), RequestError> {
+    match cx.update.reply_to_message() {
+        Some(message) => {
+            if let Some(usr) = message.from() {
+                if let Some(username) = &usr.username {
+                    if username.eq("no_dup_bot") {
+                        println!("Start deleting message");
+                        if come_from_original_author(cx) {
+                            println!("Deleting message as it comes from the same author");
+                            cx.requester
+                              .delete_message(cx.update.chat_id(), message.id)
+                              .await?;
+                        }
+                    }
+                }
+            } else {
+                println!("Trying to delete a message without user");
+            }
+        }
+        None => {
+            // println!("Use this command in a reply to another message!");
+            if with_bot_name {
+                cx.reply_to("Use this command in a reply to another message!").send().await?;
+            }
+        }
+    }
+    Ok(())
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MessageInfo {
@@ -642,12 +715,47 @@ fn need_handle(ctx: &UpdateWithCx<AutoSend<Bot>, Message>) -> bool {
     // dbg!(ctx.update.forward_from_message_id());
     // dbg!(ctx.update.forward_date());
     // dbg!(ctx.update.forward_signature());
+    // dbg!(ctx.update.reply_to_message());
 
     is_forward(&ctx)
         || ctx.update.text().to_owned()
                             .map_or(false,
                                     |ss| Url::parse(ss).is_ok())
         || is_image(&ctx)
+}
+
+async fn handle_command(ctx: &UpdateWithCx<AutoSend<Bot>, Message>) -> Result<bool, RequestError> {
+    let bot_name_str = "@no_dup_bot";
+    if let Some(text) = ctx.update.text() {
+        if let Ok(command) = Command::parse(text, "") {
+            let with_bot_name = text.contains(bot_name_str);
+            action(&ctx, command, with_bot_name).await?;
+            return Ok(true)
+        }
+    }
+    return Ok(false)
+}
+
+async fn action(
+    ctx: &UpdateWithCx<AutoSend<Bot>, Message>,
+    command: Command,
+    with_bot_name: bool
+) -> Result<(), RequestError> {
+    match command {
+        Command::Help => {
+            if with_bot_name {
+                ctx.answer(Command::descriptions()).send().await.map(|_| ())?
+            }
+        },
+        // Command::Delete => delete_replied_msg(&ctx, with_bot_name).await?,
+        Command::Top => {
+            if with_bot_name {
+                unimplemented!();
+            }
+        }
+    };
+
+    Ok(())
 }
 
 async fn run(db: Arc<Mutex<MyDB>>,
@@ -658,20 +766,29 @@ async fn run(db: Arc<Mutex<MyDB>>,
 
     let bot = Bot::from_env().auto_send();
 
+    // bot.set_my_commands(vec![teloxide::types::BotCommand::new("help", "delete")]).send().await.unwrap();
+
     let db = db.clone();
     teloxide::repl(bot, move |ctx| {
         let db = db.clone();
         let img_db = img_db.clone();
         let top_db = top_db.clone();
         async move {
-            if need_handle(&ctx) {
-                // TODO: think of a better way to do it.
-                // Currently decided to suppress this error.
-                // teloxide seem to want a RequestError, while we would want a general Error
-                parse_message(&ctx, db, img_db, top_db).await.err().map(
-                    |e|
-                    println!("parse_message see error {:?}", e)
-                );
+            match handle_command(&ctx).await {
+                Ok(true) => {
+                    println!("Command handled successfully");
+                },
+                Ok(false) | Err(_) => {
+                    if need_handle(&ctx) {
+                        // TODO: think of a better way to do it.
+                        // Currently decided to suppress this error.
+                        // teloxide seem to want a RequestError, while we would want a general Error
+                        parse_message(&ctx, db, img_db, top_db).await.err().map(
+                            |e|
+                            println!("parse_message see error {:?}", e)
+                        );
+                    }
+                },
             }
             respond(())
         }
