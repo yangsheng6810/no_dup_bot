@@ -28,6 +28,8 @@ enum Command {
     // Delete,
     #[command(description = "Show users with most duplicated messages (WIP)")]
     Top,
+    #[command(description = "Show the number of duplicate messages I sent")]
+    Me,
 }
 
 // returns true if we can get where this message is from, and it matches the
@@ -492,7 +494,6 @@ async fn check_img_hash(img_db: &Arc<Mutex<sled::Db>>, hash: &str, chat_id: &str
 
 
 async fn update_top_board(top_db: &Arc<Mutex<sled::Db>>, chat_id: &str, user_id: &Option<i64>, username: &Option<String>){
-    let top_db = top_db.lock().await;
 
     if let Some(user_id) = user_id {
 
@@ -502,9 +503,10 @@ async fn update_top_board(top_db: &Arc<Mutex<sled::Db>>, chat_id: &str, user_id:
         };
         let key = serde_json::to_string(&key).unwrap();
 
+        let top_db = top_db.lock().await;
         match top_db.get(key.as_bytes()) {
             Err(e) => {
-                println!("top board database seve error {:?} when looking for key {:?}", &e, &key);
+                println!("top board database get error {:?} when looking for key {:?}", &e, &key);
             },
             Ok(value) => {
                 let mut previous_value: i64 = 0;
@@ -573,7 +575,46 @@ async fn print_top_board(ctx: &UpdateWithCx<AutoSend<Bot>, Message>,
         final_msg.push_str(format!("{}. {} 火星了{}次\n", &count, &username, &value).as_str());
         count += 1;
     }
-    if let Ok(answer_status) = ctx.answer(final_msg).await {
+    if let Ok(_answer_status) = ctx.answer(final_msg).await {
+        // dbg!(answer_status);
+    }
+}
+
+async fn print_my_number(ctx: &UpdateWithCx<AutoSend<Bot>, Message>,
+                         top_db: &Arc<Mutex<sled::Db>>) {
+    let chat_id = get_chat_id(&ctx);
+    let user_id = ctx.update.from().map_or(None, |u| Some(u.id));
+
+    let mut final_msg = String::from("");
+
+    if let Some(user_id) = user_id {
+
+        let top_db = top_db.lock().await;
+        let key = UserKey{
+            chat_id: String::from(chat_id),
+            user_id: user_id.clone(),
+        };
+        let key = serde_json::to_string(&key).unwrap();
+
+        match top_db.get(key.as_bytes()) {
+            Err(e) => {
+                println!("top board database get error {:?} when looking for key {:?}", &e, &key);
+            },
+            Ok(Some(value)) => {
+                    let value = String::from_utf8(value.to_vec()).unwrap();
+                    println!("In top db, finding '{:?}' returns '{}'", &key, &value);
+                    let value = serde_json::from_str::<TopUserValue>(&value).unwrap();
+                    final_msg.push_str(format!("您已经火星{}次了！", value.count).as_str());
+            },
+            Ok(None) => {
+                final_msg.push_str(format!("恭喜您，您还没有火星过！").as_str());
+            }
+        }
+    } else {
+        final_msg.push_str(format!("找不到您的user_id\n").as_str())
+    }
+
+    if let Ok(answer_status) = ctx.reply_to(final_msg).await {
         dbg!(answer_status);
     }
 }
@@ -809,7 +850,7 @@ async fn handle_command(ctx: &UpdateWithCx<AutoSend<Bot>, Message>,
     let bot_name_str = "no_dup_bot";
     if let Some(text) = ctx.update.text() {
         if let Ok(command) = Command::parse(text, bot_name_str) {
-            dbg!(&command);
+            // dbg!(&command);
             if text.contains(bot_name_str) {
                 action(&ctx, command, top_db).await?;
                 return Ok(true)
@@ -836,6 +877,10 @@ async fn action(
             println!("Handling top board request");
             let chat_id = get_chat_id(&ctx);
             print_top_board(&ctx, &top_db, &chat_id).await;
+        },
+        Command::Me => {
+            println!("Handling me request");
+            print_my_number(&ctx, &top_db).await;
         }
     };
 
