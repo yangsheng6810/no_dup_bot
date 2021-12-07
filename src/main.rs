@@ -639,13 +639,10 @@ async fn parse_message(
     let user_id = ctx.update.from().map_or(None, |u| Some(u.id));
     let username = ctx.update.from().map_or(None,
                                             |u|
-                                            // if let Some(username) = u.username.clone() {
-                                            //     Some(username)
-                                            // } else {
-                                            //     Some(u.first_name.clone())
-                                            // }
-                                            Some(u.first_name.clone())
-    );
+                                            match u.last_name.clone() {
+                                                Some(last_name) => Some(format!("{} {}", u.first_name.clone(), last_name)),
+                                                None => Some(u.first_name.clone())
+                                            });
     let msg_id = ctx.update.id;
 
     match (is_forward(&ctx), is_image(&ctx)) {
