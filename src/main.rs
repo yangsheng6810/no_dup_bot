@@ -1,3 +1,4 @@
+use teloxide::payloads::SendMessageSetters;
 use teloxide::{prelude::*, net::Download, types::File as TgFile, types::PhotoSize};
 use teloxide::{RequestError, ApiError};
 use tokio::fs::File;
@@ -575,9 +576,16 @@ async fn print_top_board(ctx: &UpdateWithCx<AutoSend<Bot>, Message>,
         final_msg.push_str(format!("{}. {} 火星了{}次\n", &count, &username, &value).as_str());
         count += 1;
     }
-    if let Ok(_answer_status) = ctx.answer(final_msg).await {
+    let chat_id = ctx.chat_id().clone();
+    if let Ok(_answer_status) = ctx.requester.inner().send_message(chat_id, final_msg)
+                                                     .disable_web_page_preview(true)
+                                                     .send().await {
+
         // dbg!(answer_status);
     }
+    // if let Ok(_answer_status) = ctx.answer(final_msg).await {
+    //     // dbg!(answer_status);
+    // }
 }
 
 async fn print_my_number(ctx: &UpdateWithCx<AutoSend<Bot>, Message>,
