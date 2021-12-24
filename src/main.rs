@@ -29,6 +29,8 @@ enum Command {
     // Delete,
     #[command(description = "Show users with most duplicated messages (WIP)")]
     Top,
+    #[command(description = "Show most duplicated messages")]
+    Topics,
     #[command(description = "Show the number of duplicate messages I sent")]
     Me,
 }
@@ -187,6 +189,15 @@ impl KVStore for MyDB {
     fn delete(&self, k: &MessageKey) -> bool {
         let serialized_k = serde_json::to_string(&k).unwrap();
         self.db.remove(serialized_k.as_bytes()).is_ok()
+    }
+}
+
+impl MyDB {
+    pub fn scan_prefix<P>(&self, prefix: P) -> sled::Iter
+    where
+        P: AsRef<[u8]>,
+    {
+        self.db.scan_prefix(prefix)
     }
 }
 
@@ -532,6 +543,70 @@ async fn update_top_board(top_db: &Arc<Mutex<sled::Db>>, chat_id: &str, user_id:
     }
 }
 
+async fn print_topics(ctx: &UpdateWithCx<AutoSend<Bot>, Message>,
+                      db: Arc<Mutex<MyDB>>, chat_id: &str) {
+    // prepare an empty key so we can limit search on images from the same chat
+    let empty_key = MessageKey{
+        chat_id: String::from(chat_id),
+        // dummy url to make it happy
+        url:Url::parse("https://example.net").unwrap()};
+    let empty_key_str = serde_json::to_string(&empty_key).unwrap();
+    // the number 20 is kind of arbitrary, but seems enough to capture the first
+    // few bytes in the hash
+    let prefix = &empty_key_str.as_bytes()[0..20];
+
+    let db = db.lock().await;
+
+    let mut count = 0;
+    let mut heap = BinaryHeap::new();
+    for ans in db.scan_prefix(prefix) {
+        ans.ok().map(
+            |(key, value)| {
+                count += 1;
+                // let key = sled_to_object::<String>(key);
+                // let value = sled_to_object::<MessageKey>(value);
+
+                let top_key = serde_json::from_str::<MessageKey>(
+                    &String::from_utf8(key.to_vec()).unwrap()).unwrap();
+
+                let value = serde_json::from_str::<MessageInfo>(
+                    &String::from_utf8(value.to_vec()).unwrap()).unwrap();
+
+                let iter_chat_id = &top_key.chat_id;
+                let link = match value.link.clone() {
+                    Some(url) => url.to_string(),
+                    None => String::from("Link not available")
+                };
+
+                // We still need this test, as the prefix may not be perfect
+                if iter_chat_id.eq(&chat_id){
+                    heap.push((value.count, link));
+                }
+            });
+    }
+    let mut final_msg = String::from("火星话题排行榜：\n\n");
+    let mut count = 1;
+    let max_len = 20;
+    let last_len_hard = 30;
+    let mut last_count = 0;
+    while let Some((value, link)) = heap.pop() {
+        if count > max_len && (count > last_len_hard || value < last_count) {
+            break;
+        }
+        last_count = value;
+        final_msg.push_str(format!("{:<3} {:<7} {}\n",
+                                   format!("{}.", &count),
+                                   format!("火星{}次：", &value),
+                                   &link).as_str());
+        count += 1;
+    }
+    let chat_id = ctx.chat_id().clone();
+    if let Ok(_answer_status) = ctx.requester.inner().send_message(chat_id, final_msg)
+                                                     // .disable_web_page_preview(true)
+                                                     .send().await {
+    }
+}
+
 async fn print_top_board(ctx: &UpdateWithCx<AutoSend<Bot>, Message>,
                          top_db: &Arc<Mutex<sled::Db>>, chat_id: &str) {
     // prepare an empty key so we can limit search on images from the same chat
@@ -851,13 +926,14 @@ fn need_handle(ctx: &UpdateWithCx<AutoSend<Bot>, Message>) -> bool {
 }
 
 async fn handle_command(ctx: &UpdateWithCx<AutoSend<Bot>, Message>,
+                        db: Arc<Mutex<MyDB>>,
                         top_db: Arc<Mutex<sled::Db>>) -> Result<bool, RequestError> {
     let bot_name_str = "no_dup_bot";
     if let Some(text) = ctx.update.text() {
         if let Ok(command) = Command::parse(text, bot_name_str) {
             // dbg!(&command);
             if text.contains(bot_name_str) {
-                action(&ctx, command, top_db).await?;
+                action(&ctx, command, db, top_db).await?;
                 return Ok(true)
             } else {
                 return Ok(false)
@@ -870,6 +946,7 @@ async fn handle_command(ctx: &UpdateWithCx<AutoSend<Bot>, Message>,
 async fn action(
     ctx: &UpdateWithCx<AutoSend<Bot>, Message>,
     command: Command,
+    db: Arc<Mutex<MyDB>>,
     top_db: Arc<Mutex<sled::Db>>
 ) -> Result<(), RequestError> {
     match command {
@@ -882,6 +959,11 @@ async fn action(
             println!("Handling top board request");
             let chat_id = get_chat_id(&ctx);
             print_top_board(&ctx, &top_db, &chat_id).await;
+        },
+        Command::Topics => {
+            println!("Show topics");
+            let chat_id = get_chat_id(&ctx);
+            print_topics(&ctx, db, &chat_id).await;
         },
         Command::Me => {
             println!("Handling me request");
@@ -908,7 +990,7 @@ async fn run(db: Arc<Mutex<MyDB>>,
         let img_db = img_db.clone();
         let top_db = top_db.clone();
         async move {
-            match handle_command(&ctx, top_db.clone()).await {
+            match handle_command(&ctx, db.clone(), top_db.clone()).await {
                 Ok(true) => {
                     println!("Command handled successfully");
                 },
