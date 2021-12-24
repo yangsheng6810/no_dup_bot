@@ -5,9 +5,9 @@ rsync_synchronize='rsync -avzu --delete --info=progress2 -h'
 case $1 in
     "down")
         echo "syncing from server"
-        # $rsync_synchronize linode:git/no_dup_bot/img_db ./
-        # $rsync_synchronize linode:git/no_dup_bot/bot_db ./
-        # $rsync_synchronize linode:git/no_dup_bot/top_db ./
+        $rsync_synchronize linode:git/no_dup_bot/img_db ./
+        $rsync_synchronize linode:git/no_dup_bot/bot_db ./
+        $rsync_synchronize linode:git/no_dup_bot/top_db ./
         ;;
     "up")
         echo "syncing to server"
