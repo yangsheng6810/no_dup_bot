@@ -19,15 +19,21 @@ use img_hash::ImageHash;
 use bytes::BufMut;
 use std::collections::BinaryHeap;
 
+use std::env;
+use once_cell::sync::OnceCell;
+
+static BOT_NAME: &str = "no_dup_bot";
+static ADMIN: OnceCell<i64> = OnceCell::new();
+
 
 #[derive(BotCommand, Debug)]
 #[command(rename = "lowercase", description = "These commands are supported:")]
 enum Command {
     #[command(description = "Get help")]
     Help,
-    // #[command(description = "Reply to a bot message to delete it")]
-    // Delete,
-    #[command(description = "Show users with most duplicated messages (WIP)")]
+    #[command(description = "Reply to a bot message to delete it")]
+    Delete,
+    #[command(description = "Show users with most duplicated messages")]
     Top,
     #[command(description = "Show most duplicated messages")]
     Topics,
@@ -62,19 +68,46 @@ fn come_from_original_author(cx: &UpdateWithCx<AutoSend<Bot>, Message>) -> bool 
     true
 }
 
+fn allows_delete(cx: &UpdateWithCx<AutoSend<Bot>, Message>) -> bool {
+    let admin_id:i64 = ADMIN.get().unwrap().clone();
+    if let Some(user) = cx.update.from() {
+        dbg!(user);
+        if user.id == admin_id {
+            println!("Deleting message as directed by admin");
+            return true
+        }
+    }
+    println!("Admin not match!");
+
+    // TODO: should return false, but we can not reliably detect come from
+    // original author, so we temporarily always return true
+    false
+}
+
 // Delete the replied message
-#[allow(dead_code)]
-async fn delete_replied_msg(cx: &UpdateWithCx<AutoSend<Bot>, Message>,
-                            with_bot_name: bool)
+fn reply_to_bot(cx: &UpdateWithCx<AutoSend<Bot>, Message>) -> bool {
+    if let Some(message) = cx.update.reply_to_message() {
+        if let Some(usr) = message.from() {
+            if let Some(username) = &usr.username {
+                if username.eq(BOT_NAME) {
+                    return true
+                }
+            }
+        }
+    }
+    false
+}
+
+// Delete the replied message
+async fn delete_replied_msg(cx: &UpdateWithCx<AutoSend<Bot>, Message>)
                             -> Result<(), RequestError> {
     match cx.update.reply_to_message() {
         Some(message) => {
             if let Some(usr) = message.from() {
                 if let Some(username) = &usr.username {
-                    if username.eq("no_dup_bot") {
+                    if username.eq(BOT_NAME) {
                         println!("Start deleting message");
-                        if come_from_original_author(cx) {
-                            println!("Deleting message as it comes from the same author");
+                        if allows_delete(cx) {
                             cx.requester
                               .delete_message(cx.update.chat_id(), message.id)
                               .await?;
@@ -87,9 +120,7 @@ async fn delete_replied_msg(cx: &UpdateWithCx<AutoSend<Bot>, Message>,
         }
         None => {
             // println!("Use this command in a reply to another message!");
-            if with_bot_name {
-                cx.reply_to("Use this command in a reply to another message!").send().await?;
-            }
+            cx.reply_to("Please reply to a message sent by the bot!").send().await?;
         }
     }
     Ok(())
@@ -928,11 +959,11 @@ fn need_handle(ctx: &UpdateWithCx<AutoSend<Bot>, Message>) -> bool {
 async fn handle_command(ctx: &UpdateWithCx<AutoSend<Bot>, Message>,
                         db: Arc<Mutex<MyDB>>,
                         top_db: Arc<Mutex<sled::Db>>) -> Result<bool, RequestError> {
-    let bot_name_str = "no_dup_bot";
+    let bot_name_str = BOT_NAME;
     if let Some(text) = ctx.update.text() {
         if let Ok(command) = Command::parse(text, bot_name_str) {
-            // dbg!(&command);
-            if text.contains(bot_name_str) {
+            dbg!(&command);
+            if text.contains(bot_name_str) || reply_to_bot(&ctx){
                 action(&ctx, command, db, top_db).await?;
                 return Ok(true)
             } else {
@@ -954,7 +985,10 @@ async fn action(
             println!("Handling help request");
             ctx.answer(Command::descriptions()).send().await.map(|_| ())?
         },
-        // Command::Delete => delete_replied_msg(&ctx, with_bot_name).await?,
+        Command::Delete => {
+            println!("Handling delete request");
+            delete_replied_msg(&ctx).await?
+        },
         Command::Top => {
             println!("Handling top board request");
             let chat_id = get_chat_id(&ctx);
@@ -1012,8 +1046,26 @@ async fn run(db: Arc<Mutex<MyDB>>,
     .await;
 }
 
+fn get_env() {
+    let env_key = "NO_DUP_BOT_ADMIN";
+    let admin_str = match env::var_os(&env_key) {
+        Some(v) => v.into_string().unwrap(),
+        None => {
+            println!("${} is not set", &env_key);
+            String::from("0")
+        }
+    };
+    let admin = match admin_str.parse::<i64>() {
+        Ok(id) => id,
+        Err(_) => 0
+    };
+    // only set once, so will never fail
+    ADMIN.set(admin).unwrap();
+}
+
 #[tokio::main]
 async fn main() {
+    get_env();
     let db = Arc::new(Mutex::new(MyDB::init("bot_db")));
     let img_db = Arc::new(Mutex::new(sled::open("img_db").unwrap()));
     let top_db = Arc::new(Mutex::new(sled::open("top_db").unwrap()));
