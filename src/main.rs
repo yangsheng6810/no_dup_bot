@@ -18,12 +18,13 @@ use img_hash::ImageHash;
 // use bytes::{Bytes, BytesMut, Buf, BufMut};
 use bytes::BufMut;
 use std::collections::BinaryHeap;
+use std::collections::HashSet;
 
 use std::env;
 use once_cell::sync::OnceCell;
 
 static BOT_NAME: &str = "no_dup_bot";
-static ADMIN: OnceCell<i64> = OnceCell::new();
+static ADMIN: OnceCell<HashSet<i64>> = OnceCell::new();
 
 
 #[derive(BotCommand, Debug)]
@@ -69,11 +70,11 @@ fn come_from_original_author(cx: &UpdateWithCx<AutoSend<Bot>, Message>) -> bool 
 }
 
 fn allows_delete(cx: &UpdateWithCx<AutoSend<Bot>, Message>) -> bool {
-    let admin_id:i64 = ADMIN.get().unwrap().clone();
+    let admin_db = ADMIN.get().unwrap().clone();
     if let Some(user) = cx.update.from() {
-        dbg!(user);
-        if user.id == admin_id {
-            println!("Deleting message as directed by admin");
+        // dbg!(user);
+        if admin_db.contains(&user.id) {
+            println!("Deleting message as directed by admin {}", &user.id);
             return true
         }
     }
@@ -728,8 +729,8 @@ async fn print_my_number(ctx: &UpdateWithCx<AutoSend<Bot>, Message>,
         final_msg.push_str(format!("找不到您的user_id\n").as_str())
     }
 
-    if let Ok(answer_status) = ctx.reply_to(final_msg).await {
-        dbg!(answer_status);
+    if let Ok(_answer_status) = ctx.reply_to(final_msg).await {
+        // dbg!(answer_status);
     }
 }
 
@@ -1048,6 +1049,7 @@ async fn run(db: Arc<Mutex<MyDB>>,
 
 fn get_env() {
     let env_key = "NO_DUP_BOT_ADMIN";
+    let mut admin_db = HashSet::new();
     let admin_str = match env::var_os(&env_key) {
         Some(v) => v.into_string().unwrap(),
         None => {
@@ -1055,12 +1057,15 @@ fn get_env() {
             String::from("0")
         }
     };
-    let admin = match admin_str.parse::<i64>() {
-        Ok(id) => id,
-        Err(_) => 0
-    };
+    for id in admin_str.split(":"){
+        let admin = match id.parse::<i64>() {
+            Ok(id) => id,
+            Err(_) => 0
+        };
+        admin_db.insert(admin);
+    }
     // only set once, so will never fail
-    ADMIN.set(admin).unwrap();
+    ADMIN.set(admin_db).unwrap();
 }
 
 #[tokio::main]
