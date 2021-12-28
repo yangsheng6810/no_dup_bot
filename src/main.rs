@@ -679,7 +679,14 @@ async fn print_top_board(ctx: &UpdateWithCx<AutoSend<Bot>, Message>,
     }
     let mut final_msg = String::from("火星排行榜：\n\n");
     let mut count = 1;
+    let max_len = 20;
+    let last_len_hard = 30;
+    let mut last_count = 0;
     while let Some((value, username)) = heap.pop() {
+        if count > max_len && (count > last_len_hard || value < last_count) {
+            break;
+        }
+        last_count = value;
         final_msg.push_str(format!("{}. {} 火星了{}次\n", &count, &username, &value).as_str());
         count += 1;
     }
