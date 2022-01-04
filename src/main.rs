@@ -5,7 +5,7 @@ use tokio::fs::File;
 use teloxide::utils::command::BotCommand;
 
 use std::sync::Arc;
-use tokio::sync::Mutex;
+use tokio::sync::{Mutex, MutexGuard};
 
 use url::Url;
 use serde::{Deserialize, Serialize};
@@ -25,6 +25,7 @@ use once_cell::sync::OnceCell;
 
 static BOT_NAME: &str = "no_dup_bot";
 static ADMIN: OnceCell<HashSet<i64>> = OnceCell::new();
+static TIME_OUT_DAYS: i64 = 10;
 
 
 #[derive(BotCommand, Debug)]
@@ -491,12 +492,15 @@ async fn check_img_hash(img_db: &Arc<Mutex<sled::Db>>, hash: &str, chat_id: &str
     let img_db = img_db.lock().await;
 
     let now = Utc::now();
-    let time_out_time = now.checked_sub_signed(Duration::days(10)).unwrap();
+    let time_out_time = now.checked_sub_signed(Duration::days(TIME_OUT_DAYS)).unwrap();
+    let dry_run = true;
 
     let mut best_hash: Option<ImageHash> = None;
     let mut best_dist: Option<u32> = None;
     let mut best_url: Option<MessageKey> = None;
     let mut count = 0;
+
+    let mut old_img_set = HashSet::new();
 
     for ans in img_db.scan_prefix(prefix) {
         ans.ok().map(
@@ -516,15 +520,12 @@ async fn check_img_hash(img_db: &Arc<Mutex<sled::Db>>, hash: &str, chat_id: &str
                 let iter_chat_id = &img_key.chat_id;
                 let iter_hash = &img_key.hash_str;
 
-                // remove items too old
-                if img_value.timestamp < time_out_time {
-                    match img_db.remove(&key){
-                        Ok(_) => {println!("Successfully removing old key {:?} from img_db", &img_key);},
-                        Err(e) => {println!("Error in removing old key {:?} from img_db: {:?}", &img_key, &e);}
-                    }
-                } else {
-                    // We still need this test, as the prefix may not be perfect
-                    if iter_chat_id.eq(&chat_id){
+                // We still need this test, as the prefix may not be perfect
+                if iter_chat_id.eq(&chat_id){
+                    // remove items too old
+                    if img_value.timestamp < time_out_time {
+                        old_img_set.insert(key.clone());
+                    } else {
                         // println!("Saw {:?} {:?}", &key, &value);
                         let iter_hash = ImageHash::from_base64(&iter_hash).unwrap();
                         let dist = iter_hash.dist(&hash);
@@ -546,10 +547,14 @@ async fn check_img_hash(img_db: &Arc<Mutex<sled::Db>>, hash: &str, chat_id: &str
                 }
             });
     }
-    match best_dist {
+    let match_ans = match best_dist {
         Some(dist) => {
             println!("The best distance is {} among all {} entries", dist, count);
             if dist < similarity_threshold {
+                // the best match should update its timestamp, and removed from old img set
+                if let Some(best_hash) = best_hash.clone() {
+                    touch_image(&img_db, &chat_id, &best_hash, &mut old_img_set);
+                }
                 best_hash.map(|h| println!("Use this hash! {:?}", h.to_base64()));
                 best_url.as_ref().map(|u| println!("with url {:?}", u));
                 Ok(best_url)
@@ -560,7 +565,47 @@ async fn check_img_hash(img_db: &Arc<Mutex<sled::Db>>, hash: &str, chat_id: &str
         None => {
             Ok(None)
         }
+    };
+
+    // currently only try real delete on test group
+    if chat_id == String::from("-413292030") {
+        for key in old_img_set {
+            let img_key = serde_json::from_str::<ImageKey>(
+                &String::from_utf8(key.to_vec()).unwrap()).unwrap();
+            if dry_run {
+                println!("Dry run remove old key {:?}", &img_key)
+            } else {
+                match img_db.remove(&key){
+                    Ok(_) => {println!("Successfully removing old key {:?} from img_db", &img_key);},
+                    Err(e) => {println!("Error in removing old key {:?} from img_db: {:?}", &img_key, &e);}
+                }
+            }
+        }
     }
+    match_ans
+}
+
+fn touch_image(img_db: &MutexGuard<sled::Db>, chat_id: &str, hash_str: &ImageHash,
+               old_img_set: &mut HashSet<sled::IVec>) -> bool {
+    let best_key = ImageKey{
+        chat_id: String::from(chat_id),
+        hash_str: String::from(hash_str.to_base64())
+    };
+    let serialized_key = serde_json::to_string(&best_key).unwrap();
+
+    old_img_set.remove(serialized_key.as_bytes());
+
+    let value = img_db.get(serialized_key.as_bytes());
+    if let Ok(Some(value)) = value {
+        let mut v = serde_json::from_str::<ImageValue>(&String::from_utf8(value.to_vec()).unwrap()).unwrap();
+        v.timestamp = Utc::now();
+        let serized_v = serde_json::to_string(&v).unwrap();
+        match img_db.insert(serialized_key.as_bytes(), serized_v.as_bytes()) {
+            Ok(_) => {println!("Timestamp upadted for {:?}", &best_key.hash_str)},
+            Err(_) => {println!("Timestamp update failed for {:?}", &best_key.hash_str)}
+        };
+    }
+    true
 }
 
 
@@ -766,12 +811,15 @@ async fn print_my_number(ctx: &UpdateWithCx<AutoSend<Bot>, Message>,
     if let Ok(_answer_status) = ctx.reply_to(final_msg).await {
         // dbg!(answer_status);
     }
+
+}
+
 #[allow(dead_code)]
 async fn cleanup_img_db(img_db: &Arc<Mutex<sled::Db>>, chat_id: &str) -> Result<()> {
     let img_db = img_db.lock().await;
     let mut count = 0;
     let now = Utc::now();
-    if let Some(time_out_time) = now.checked_sub_signed(Duration::days(10)) {
+    if let Some(time_out_time) = now.checked_sub_signed(Duration::days(TIME_OUT_DAYS)) {
         for ans in img_db.iter() {
             ans.ok().map(
                 |(key, value)| {
