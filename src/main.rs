@@ -292,17 +292,6 @@ fn get_text(ctx: &UpdateWithCx<AutoSend<Bot>, Message>) -> Option<String> {
     Some(String::from(ss))
 }
 
-fn get_filename() -> String {
-    let duration = SystemTime::now().duration_since(UNIX_EPOCH).expect("Time went back");
-    let filename = format!("./{}.jpeg", duration.as_millis());
-    filename
-}
-
-fn remove_file(filename: &str) {
-    std::fs::remove_file(filename)
-        .err().map(|e| println!("Unable to delete file {:?}", e));
-}
-
 fn filter_url(ctx: &UpdateWithCx<AutoSend<Bot>, Message>, url: Option<Url>) -> Option<Url> {
     let mut url = url?;
     // Remove params
@@ -377,45 +366,6 @@ async fn get_hash_new(ctx: &UpdateWithCx<AutoSend<Bot>, Message>, img_to_downloa
                 println!("Failed to parse image: {:?}", &e);
                 Ok(None)
             }
-        }
-    }
-}
-
-async fn get_hash(ctx: &UpdateWithCx<AutoSend<Bot>, Message>, img_to_download: &PhotoSize) -> Result<Option<String>>{
-    let filename = get_filename();
-    let TgFile { file_path, .. } = ctx.requester.get_file(&img_to_download.file_id).send().await?;
-    match File::create(&filename).await {
-        Ok(mut file) => {
-            match ctx.requester.download_file(&file_path, &mut file).await {
-                Ok(()) => {
-                    // println!("Download success to file {:?}", file);
-                    file.sync_all().await?;
-                    match image::open(&filename) {
-                        Ok(image) => {
-                            let hasher = img_hash::HasherConfig::new().to_hasher();
-                            let hash = Some(hasher.hash_image(&image).to_base64());
-                            remove_file(&filename);
-                            Ok(hash)
-                        },
-                        Err(e) => {
-                            println!("Failed to re-read file, {:?}", e);
-                            // Temporarily disable file remove for debug purpose
-                            // remove_file(&filename);
-                            Ok(None)
-                        }
-                    }
-                },
-                Err(e) => {
-                    println!("Download error {:?}", e);
-                    remove_file(&filename);
-                    Ok(None)
-                }
-            }
-        },
-        Err(e) => {
-            println!("Cannot create tempfile due to {:?}", e);
-            remove_file(&filename);
-            Ok(None)
         }
     }
 }
@@ -915,7 +865,6 @@ async fn parse_message(
                 }
             }
             if let Some(img) = img_to_download {
-                let mut old_hash = None;
                 let mut new_hash = None;
                 match get_hash_new(&ctx, &img).await {
                     Ok(Some(hash)) => {
@@ -949,22 +898,6 @@ async fn parse_message(
                         println!("Get hash error {:?}", e);
                     }
                 };
-                // for debug
-                match get_hash(&ctx, &img).await {
-                    Ok(Some(hash)) => {
-                        old_hash = Some(hash);
-                    },
-                    Ok(None) => {
-                        println!("Failed to get hash");
-                    },
-                    Err(e) => {
-                        println!("get_hash_new has error {:?}", e)
-                    }
-                };
-                if old_hash != new_hash {
-                    println!("================================");
-                    println!("Hash mismatch!! Old hash {:?}, new hash {:?}", old_hash, new_hash)
-                }
             }
         },
         (false, false) => {
