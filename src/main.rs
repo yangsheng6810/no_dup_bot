@@ -479,7 +479,7 @@ async fn contains_img_hash(img_db: &Arc<Mutex<sled::Db>>, hash: &str, chat_id: &
 // also deletes old img_db entries
 async fn check_img_hash(img_db: &Arc<Mutex<sled::Db>>, hash: &str, chat_id: &str) -> Result<Option<MessageKey>> {
     // images with similarity < threshold will be considered the same
-    let similarity_threshold = 5u32;
+    let similarity_threshold = 4u32;
     let hash = ImageHash::from_base64(&hash).unwrap();
 
     // prepare an empty key so we can limit search on images from the same chat
