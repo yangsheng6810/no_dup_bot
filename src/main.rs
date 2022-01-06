@@ -304,7 +304,9 @@ fn remove_file(filename: &str) {
 }
 
 fn filter_url(ctx: &UpdateWithCx<AutoSend<Bot>, Message>, url: Option<Url>) -> Option<Url> {
-    let url = url?;
+    let mut url = url?;
+    // Remove params
+    url.set_query(None);
     let mut filtered_out = false;
 
     let chat_id = get_chat_id(&ctx);
