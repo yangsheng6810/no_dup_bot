@@ -1,7 +1,6 @@
 use teloxide::payloads::SendMessageSetters;
 use teloxide::{prelude::*, net::Download, types::File as TgFile, types::PhotoSize};
 use teloxide::{RequestError, ApiError};
-use tokio::fs::File;
 use teloxide::utils::command::BotCommand;
 
 use std::sync::Arc;
@@ -10,7 +9,6 @@ use tokio::sync::{Mutex, MutexGuard};
 use url::Url;
 use serde::{Deserialize, Serialize};
 
-use std::time::{SystemTime, UNIX_EPOCH};
 use std::io::{Error, ErrorKind};
 
 use anyhow::Result;
@@ -873,11 +871,9 @@ async fn parse_message(
                 }
             }
             if let Some(img) = img_to_download {
-                let mut new_hash = None;
                 match get_hash_new(&ctx, &img).await {
                     Ok(Some(hash)) => {
                         println!("Get hash {}", &hash);
-                        new_hash = Some(hash.clone());
                         match check_img_hash(&img_db, &hash, &clean_chat_id).await {
                             Ok(Some(key)) => {
                                 println!("Found existing hash {:?} that is close", key.url);
