@@ -325,7 +325,7 @@ fn filter_url(ctx: &UpdateWithCx<AutoSend<Bot>, Message>, url: Option<Url>) -> O
                     }
                 }
             },
-            "github.com" => {
+            "github.com" | "stackoverflow.com" => {
                 dbg!("In github.com");
                 filtered_out = true;
             },
