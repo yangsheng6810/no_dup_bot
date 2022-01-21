@@ -68,11 +68,15 @@ fn come_from_original_author(cx: &UpdateWithCx<AutoSend<Bot>, Message>) -> bool 
     true
 }
 
-fn allows_delete(cx: &UpdateWithCx<AutoSend<Bot>, Message>) -> bool {
+fn is_admin(user: &teloxide::types::User) -> bool {
     let admin_db = ADMIN.get().unwrap().clone();
+    admin_db.contains(&user.id)
+}
+
+fn allows_delete(cx: &UpdateWithCx<AutoSend<Bot>, Message>) -> bool {
     if let Some(user) = cx.update.from() {
         // dbg!(user);
-        if admin_db.contains(&user.id) {
+        if is_admin(&user) {
             println!("Deleting message as directed by admin {}", &user.id);
             return true
         }
