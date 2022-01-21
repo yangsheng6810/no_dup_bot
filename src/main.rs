@@ -773,7 +773,7 @@ async fn print_top_board(ctx: &UpdateWithCx<AutoSend<Bot>, Message>,
                 };
 
                 // We still need this test, as the prefix may not be perfect
-                if iter_chat_id.eq(&chat_id){
+                if iter_chat_id.eq(&chat_id) && value.count > 0{
                     heap.push((value.count, username));
                 }
             });
@@ -783,13 +783,17 @@ async fn print_top_board(ctx: &UpdateWithCx<AutoSend<Bot>, Message>,
     let max_len = 20;
     let last_len_hard = 30;
     let mut last_count = 0;
-    while let Some((value, username)) = heap.pop() {
-        if count > max_len && (count > last_len_hard || value < last_count) {
-            break;
+    if heap.len() > 0 {
+        while let Some((value, username)) = heap.pop() {
+            if count > max_len && (count > last_len_hard || value < last_count) {
+                break;
+            }
+            last_count = value;
+            final_msg.push_str(format!("{}. {} 火星了{}次\n", &count, &username, &value).as_str());
+            count += 1;
         }
-        last_count = value;
-        final_msg.push_str(format!("{}. {} 火星了{}次\n", &count, &username, &value).as_str());
-        count += 1;
+    } else {
+        final_msg.push_str("本群还没有人火星过！\n");
     }
     let chat_id = ctx.chat_id().clone();
     if let Ok(_answer_status) = ctx.requester.inner().send_message(chat_id, final_msg)
@@ -827,7 +831,11 @@ async fn print_my_number(ctx: &UpdateWithCx<AutoSend<Bot>, Message>,
                     let value = String::from_utf8(value.to_vec()).unwrap();
                     println!("In top db, finding '{:?}' returns '{}'", &key, &value);
                     let value = serde_json::from_str::<TopUserValue>(&value).unwrap();
-                    final_msg.push_str(format!("您已经火星{}次了！", value.count).as_str());
+                    if value.count > 0 {
+                        final_msg.push_str(format!("您已经火星{}次了！", value.count).as_str());
+                    } else {
+                        final_msg.push_str(format!("恭喜您，您还没有火星过！").as_str());
+                    }
             },
             Ok(None) => {
                 final_msg.push_str(format!("恭喜您，您还没有火星过！").as_str());
