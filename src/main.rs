@@ -39,6 +39,8 @@ enum Command {
     Topics,
     #[command(description = "Show the number of duplicate messages I sent")]
     Me,
+    #[command(description = "Reset the top record for the current chat")]
+    ResetTop,
 }
 
 // returns true if we can get where this message is from, and it matches the
@@ -68,18 +70,23 @@ fn come_from_original_author(cx: &UpdateWithCx<AutoSend<Bot>, Message>) -> bool 
     true
 }
 
-fn is_admin(user: &teloxide::types::User) -> bool {
+fn is_admin(cx: &UpdateWithCx<AutoSend<Bot>, Message>) -> bool {
     let admin_db = ADMIN.get().unwrap().clone();
-    admin_db.contains(&user.id)
+
+    if let Some(user) = cx.update.from() {
+        // dbg!(user);
+        if admin_db.contains(&user.id) {
+            println!("Admin {:?} confirmed", &user.id);
+            return true
+        }
+    }
+    false
 }
 
 fn allows_delete(cx: &UpdateWithCx<AutoSend<Bot>, Message>) -> bool {
-    if let Some(user) = cx.update.from() {
-        // dbg!(user);
-        if is_admin(&user) {
-            println!("Deleting message as directed by admin {}", &user.id);
-            return true
-        }
+    if is_admin(&cx) {
+        println!("Deleting message as directed by admin");
+        return true
     }
     println!("Admin not match!");
 
@@ -569,6 +576,67 @@ fn touch_image(img_db: &MutexGuard<sled::Db>, chat_id: &str, hash_str: &ImageHas
     true
 }
 
+
+async fn reset_top_board(ctx: &UpdateWithCx<AutoSend<Bot>, Message>,
+                         top_db: &Arc<Mutex<sled::Db>>){
+
+    let chat_id = get_chat_id(&ctx);
+
+    // prepare an empty key so we can limit search on images from the same chat
+    let empty_key = UserKey{chat_id: chat_id.clone(), user_id: 0};
+    let empty_key_str = serde_json::to_string(&empty_key).unwrap();
+    // the number 20 is kind of arbitrary, but seems enough to capture the first
+    // few bytes in the hash
+    let prefix = &empty_key_str.as_bytes()[0..20];
+
+    let top_db = top_db.lock().await;
+
+    let mut count = 0;
+    for ans in top_db.scan_prefix(prefix) {
+        ans.ok().map(
+            |(key, value)| {
+                count += 1;
+                // let key = sled_to_object::<String>(key);
+                // let value = sled_to_object::<MessageKey>(value);
+
+                let iter_key = serde_json::from_str::<UserKey>(
+                    &String::from_utf8(key.to_vec()).unwrap()).unwrap();
+
+                let iter_value = serde_json::from_str::<TopUserValue>(
+                    &String::from_utf8(value.to_vec()).unwrap()).unwrap();
+
+                let iter_chat_id = &iter_key.chat_id;
+                let iter_user_id = &iter_key.user_id;
+                let username = match iter_value.username.clone() {
+                    Some(user_name) => user_name,
+                    None => iter_user_id.to_string()
+                };
+
+                // We still need this test, as the prefix may not be perfect
+                if iter_chat_id.eq(&chat_id){
+                    let key = UserKey{
+                        chat_id: chat_id.clone(),
+                        user_id: iter_user_id.clone(),
+                    };
+                    let value = TopUserValue{
+                        username: Some(username.clone()),
+                        count: 0
+                    };
+                    let key = serde_json::to_string(&key).unwrap();
+                    let value = serde_json::to_string(&value).unwrap();
+
+                    if let Err(e) = top_db.insert(key.as_bytes(), value.as_bytes()) {
+                        println!("top database error {:?} when saving key {:?} with value {:?}", &e, &key, &value);
+                    }
+                }
+            });
+    }
+
+    let final_msg = String::from("本群火星排行榜已重置");
+    if let Ok(_answer_status) = ctx.reply_to(final_msg).await {
+        // dbg!(answer_status);
+    }
+}
 
 async fn update_top_board(top_db: &Arc<Mutex<sled::Db>>, chat_id: &str, user_id: &Option<i64>, username: &Option<String>){
 
@@ -1068,6 +1136,13 @@ async fn action(
         Command::Me => {
             println!("Handling me request");
             print_my_number(&ctx, &top_db).await;
+        },
+        Command::ResetTop => {
+            println!("Handling ResetTop request");
+            if is_admin(&ctx) {
+                println!("Resetting top board for current chat");
+                reset_top_board(&ctx, &top_db).await;
+            }
         }
     };
 
