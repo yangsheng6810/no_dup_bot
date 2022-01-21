@@ -291,14 +291,13 @@ fn get_text(ctx: &UpdateWithCx<AutoSend<Bot>, Message>) -> Option<String> {
 }
 
 fn filter_url(ctx: &UpdateWithCx<AutoSend<Bot>, Message>, url: Option<Url>) -> Option<Url> {
-    let mut url = url?;
+    let url = url?;
     // Remove params
-    url.set_query(None);
+    // url.set_query(None);
     let mut filtered_out = false;
 
     let chat_id = get_chat_id(&ctx);
     if let Some(domain) = url.domain() {
-        // println!("domain is {}", domain);
         dbg!(&domain);
         match domain {
             "t.me" => {
@@ -326,7 +325,7 @@ fn filter_url(ctx: &UpdateWithCx<AutoSend<Bot>, Message>, url: Option<Url>) -> O
                 }
             },
             "github.com" | "stackoverflow.com" => {
-                dbg!("In github.com");
+                // dbg!("In github.com");
                 filtered_out = true;
             },
             _ => {}
@@ -906,7 +905,7 @@ async fn parse_message(
         },
         (false, false) => {
             // not forward nor image, only interested in pure url
-            println!("Found a non-forward, non-image message");
+            // println!("Found a non-forward, non-image message");
             url = get_url(&ctx);
             if url.is_none(){
                 println!("Non-forwarded message link parse failure.")
@@ -1025,7 +1024,7 @@ async fn handle_command(ctx: &UpdateWithCx<AutoSend<Bot>, Message>,
     let bot_name_str = BOT_NAME;
     if let Some(text) = ctx.update.text() {
         if let Ok(command) = Command::parse(text, bot_name_str) {
-            dbg!(&command);
+            // dbg!(&command);
             if text.contains(bot_name_str) || reply_to_bot(&ctx){
                 action(&ctx, command, db, top_db).await?;
                 return Ok(true)
