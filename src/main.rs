@@ -20,7 +20,8 @@ use std::collections::HashSet;
 
 use std::env;
 use once_cell::sync::OnceCell;
-use log::{debug, error, log_enabled, info, Level};
+use tracing::{debug, error, info, span, warn, Level};
+use tracing_subscriber;
 
 static BOT_NAME: &str = "no_dup_bot";
 static ADMIN: OnceCell<HashSet<i64>> = OnceCell::new();
@@ -52,13 +53,13 @@ enum Command {
 #[allow(dead_code)]
 fn come_from_original_author(cx: &UpdateWithCx<AutoSend<Bot>, Message>) -> bool {
     if let Some(this_message_from) = cx.update.from() {
-        dbg!(this_message_from);
+        debug!("this_message_from is {:?}", this_message_from);
         if let Some(message) = cx.update.reply_to_message() {
-            dbg!(message);
+            debug!("message is {:?}", message);
             if let Some(first_message) = message.reply_to_message() {
-                dbg!(first_message);
+                debug!("first_message is {:?}", first_message);
                 if let Some(original_from) = first_message.from(){
-                    dbg!(original_from);
+                    debug!("original_from is {:?}", original_from);
                     if original_from.id == this_message_from.id {
                         return true
                     }
@@ -278,16 +279,16 @@ fn get_msg_link(ctx: &UpdateWithCx<AutoSend<Bot>, Message>) -> Option<Url> {
 
 fn get_forward_msg_link(message: &UpdateWithCx<AutoSend<Bot>, Message>) -> Option<Url> {
     let chat = message.update.forward_from_chat()?;
-    dbg!(chat.username());
+    debug!("chat.username() is {:?}", chat.username());
     if let (Some(username), Some(message_id))
         = (chat.username(), message.update.forward_from_message_id())
     {
         let url = Url::parse(&format!("https://t.me/{}/{}", username, message_id)).ok();
-        dbg!(&url);
+        debug!("&url is {:?}", &url);
         url
     } else {
         info!("Parse forwarded message failed");
-        dbg!(chat);
+        debug!("chat is {:?}", chat);
         None
     }
 }
@@ -310,7 +311,7 @@ fn filter_url(ctx: &UpdateWithCx<AutoSend<Bot>, Message>, url: Option<Url>) -> O
 
     let chat_id = get_chat_id(&ctx);
     if let Some(domain) = url.domain() {
-        dbg!(&domain);
+        debug!("domain is {:?}", &domain);
         match domain {
             "t.me" => {
                 if let Some(mut path_segments) = url.path_segments(){
@@ -363,7 +364,7 @@ async fn get_hash_new(ctx: &UpdateWithCx<AutoSend<Bot>, Message>, img_to_downloa
                 buf.put(b);
             }
             Err(e) => {
-                dbg!(e);
+                error!("Error is {:?}", e);
                 found_error = true;
             }
         }
@@ -380,7 +381,7 @@ async fn get_hash_new(ctx: &UpdateWithCx<AutoSend<Bot>, Message>, img_to_downloa
                 Ok(hash)
             },
             Err(e) => {
-                info!("Failed to parse image: {:?}", &e);
+                error!("Failed to parse image: {:?}", &e);
                 Ok(None)
             }
         }
@@ -538,15 +539,17 @@ async fn check_img_hash(img_db: &Arc<Mutex<sled::Db>>, hash: &str, chat_id: &str
 
     // currently only try real delete on test group
     if chat_id == String::from("-413292030") {
+        let clean_up_span = span!(Level::DEBUG, "img_clean_up");
+        let _enter = clean_up_span.enter();
         for key in old_img_set {
             let img_key = serde_json::from_str::<ImageKey>(
                 &String::from_utf8(key.to_vec()).unwrap()).unwrap();
             if dry_run {
-                info!("Dry run remove old key {:?}", &img_key)
+                debug!("Dry run remove old key {:?}", &img_key)
             } else {
                 match img_db.remove(&key){
                     Ok(_) => {info!("Successfully removing old key {:?} from img_db", &img_key);},
-                    Err(e) => {info!("Error in removing old key {:?} from img_db: {:?}", &img_key, &e);}
+                    Err(e) => {error!("Error in removing old key {:?} from img_db: {:?}", &img_key, &e);}
                 }
             }
         }
@@ -571,7 +574,7 @@ fn touch_image(img_db: &MutexGuard<sled::Db>, chat_id: &str, hash_str: &ImageHas
         let serized_v = serde_json::to_string(&v).unwrap();
         match img_db.insert(serialized_key.as_bytes(), serized_v.as_bytes()) {
             Ok(_) => {info!("Timestamp upadted for {:?}", &best_key.hash_str)},
-            Err(_) => {info!("Timestamp update failed for {:?}", &best_key.hash_str)}
+            Err(_) => {error!("Timestamp update failed for {:?}", &best_key.hash_str)}
         };
     }
     true
@@ -627,7 +630,7 @@ async fn reset_top_board(ctx: &UpdateWithCx<AutoSend<Bot>, Message>,
                     let value = serde_json::to_string(&value).unwrap();
 
                     if let Err(e) = top_db.insert(key.as_bytes(), value.as_bytes()) {
-                        info!("top database error {:?} when saving key {:?} with value {:?}", &e, &key, &value);
+                        error!("top database error {:?} when saving key {:?} with value {:?}", &e, &key, &value);
                     }
                 }
             });
@@ -652,7 +655,7 @@ async fn update_top_board(top_db: &Arc<Mutex<sled::Db>>, chat_id: &str, user_id:
         let top_db = top_db.lock().await;
         match top_db.get(key.as_bytes()) {
             Err(e) => {
-                info!("top board database get error {:?} when looking for key {:?}", &e, &key);
+                error!("top board database get error {:?} when looking for key {:?}", &e, &key);
             },
             Ok(value) => {
                 let mut previous_value: i64 = 0;
@@ -670,7 +673,7 @@ async fn update_top_board(top_db: &Arc<Mutex<sled::Db>>, chat_id: &str, user_id:
                 let value = serde_json::to_string(&value).unwrap();
 
                 if let Err(e) = top_db.insert(key.as_bytes(), value.as_bytes()) {
-                    info!("database seve error {:?} when saving key {:?} with value {:?}", &e, &key, &value);
+                    error!("database seve error {:?} when saving key {:?} with value {:?}", &e, &key, &value);
                 }
             }
         }
@@ -826,7 +829,7 @@ async fn print_my_number(ctx: &UpdateWithCx<AutoSend<Bot>, Message>,
 
         match top_db.get(key.as_bytes()) {
             Err(e) => {
-                info!("top board database get error {:?} when looking for key {:?}", &e, &key);
+                error!("top board database get error {:?} when looking for key {:?}", &e, &key);
             },
             Ok(Some(value)) => {
                     let value = String::from_utf8(value.to_vec()).unwrap();
@@ -882,7 +885,7 @@ async fn cleanup_img_db(img_db: &Arc<Mutex<sled::Db>>, chat_id: &str) -> Result<
                                     info!("Successfully removing {:?} from img_db", &img_key);
                                 },
                                 Err(e) => {
-                                    info!("Error in removing {:?} from img_db, error {:?}", &img_key, &e);
+                                    error!("Error in removing {:?} from img_db, error {:?}", &img_key, &e);
                                 }
                             }
                         }
@@ -901,6 +904,9 @@ async fn parse_message(
     img_db: Arc<Mutex<sled::Db>>,
     top_db: Arc<Mutex<sled::Db>>
 ) -> Result<()> {
+    let parse_message_span = span!(Level::INFO, "message handling");
+    let _enter = parse_message_span.enter();
+
     let mut url: Option<Url>;
     let link = get_msg_link(&ctx);
     let clean_chat_id = get_chat_id(&ctx);
@@ -916,10 +922,11 @@ async fn parse_message(
     match (is_forward(&ctx), is_image(&ctx)) {
         (true, false) => {
             // is a forward message
-            info!("Found a forwarded message");
             url = get_forward_msg_link(&ctx);
-            if url.is_none(){
-                info!("Forwarded message link parse failure.")
+            if url.is_some(){
+                debug!("Found a forwarded channel message");
+            } else {
+                debug!("Forwarded message link parse failure.")
             }
         },
         // (true, true) => {
@@ -932,7 +939,7 @@ async fn parse_message(
         // },
         (_, true) => {
             // is an image, but not forward
-            info!("Found an image message that is not a forward");
+            info!("Found an image message that is not a channel forward");
             url = None;
             let img_vec = ctx.update.photo()
                                     .ok_or(Error::new(ErrorKind::Other, "failed to download img_vec"))?;
@@ -989,7 +996,7 @@ async fn parse_message(
             // info!("Found a non-forward, non-image message");
             url = get_url(&ctx);
             if url.is_none(){
-                info!("Non-forwarded message link parse failure.")
+                debug!("Non-forwarded message link parse failure.")
             }
             url = filter_url(&ctx, url);
         }
@@ -1021,7 +1028,7 @@ async fn parse_message(
             db.save(&key, &value);
         };
     } else {
-        get_text(&ctx).map(|text| info!("Pong, {}", text));
+        get_text(&ctx).map(|text| debug!("Msg: {}", text));
     }
     // delete my message if the message we replied to gets deleted
     if let Some(my_msg_id) = my_msg_id {
@@ -1161,8 +1168,7 @@ async fn action(
 async fn run(db: Arc<Mutex<MyDB>>,
              img_db: Arc<Mutex<sled::Db>>,
              top_db: Arc<Mutex<sled::Db>>) {
-    teloxide::enable_logging!();
-    log::info!("Starting simple_commands_bot...");
+    info!("Starting simple_commands_bot...");
 
     let bot = Bot::from_env().auto_send();
 
@@ -1202,7 +1208,7 @@ fn get_env() {
     let admin_str = match env::var_os(&env_key) {
         Some(v) => v.into_string().unwrap(),
         None => {
-            info!("${} is not set", &env_key);
+            error!("${} is not set", &env_key);
             String::from("0")
         }
     };
@@ -1220,7 +1226,7 @@ fn get_env() {
 #[tokio::main]
 async fn main() {
     get_env();
-    env_logger::init();
+    tracing_subscriber::fmt::init();
     let db = Arc::new(Mutex::new(MyDB::init("bot_db")));
     let img_db = Arc::new(Mutex::new(sled::open("img_db").unwrap()));
     let top_db = Arc::new(Mutex::new(sled::open("top_db").unwrap()));
