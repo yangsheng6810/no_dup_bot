@@ -573,7 +573,7 @@ fn touch_image(img_db: &MutexGuard<sled::Db>, chat_id: &str, hash_str: &ImageHas
         v.timestamp = Utc::now();
         let serized_v = serde_json::to_string(&v).unwrap();
         match img_db.insert(serialized_key.as_bytes(), serized_v.as_bytes()) {
-            Ok(_) => {info!("Timestamp upadted for {:?}", &best_key.hash_str)},
+            Ok(_) => {info!("Timestamp updated for {:?}", &best_key.hash_str)},
             Err(_) => {warn!("Timestamp update failed for {:?}", &best_key.hash_str)}
         };
     }
