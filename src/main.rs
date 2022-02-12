@@ -20,7 +20,7 @@ use std::collections::HashSet;
 
 use std::env;
 use once_cell::sync::OnceCell;
-use tracing::{debug, debug_span, error, info, span, warn, Level, Instrument};
+use tracing::{debug, debug_span, info, span, warn, Level, Instrument};
 use tracing_subscriber;
 
 static BOT_NAME: &str = "no_dup_bot";
@@ -211,7 +211,7 @@ impl KVStore for MyDB {
         let serialized_v = serde_json::to_string(&v).unwrap();
 
         if self.db.insert(serialized_k.as_bytes(), serialized_v.as_bytes()).is_err() {
-            error!("database seve error when saving key {:?} with value {:?}", &k, &v);
+            warn!("database seve error when saving key {:?} with value {:?}", &k, &v);
             false
         } else {
             true
@@ -232,7 +232,7 @@ impl KVStore for MyDB {
                 None
             },
             Err(e) => {
-                error!("Error retrieving value for {:?}: {}", k, e);
+                warn!("Error retrieving value for {:?}: {}", k, e);
                 None
             }
         }
@@ -364,14 +364,14 @@ async fn get_hash_new(ctx: &UpdateWithCx<AutoSend<Bot>, Message>, img_to_downloa
                 buf.put(b);
             }
             Err(e) => {
-                error!("Error is {:?}", e);
+                warn!("Error is {:?}", e);
                 found_error = true;
             }
         }
     }
     // info!("count is {:?}", count);
     if found_error {
-        error!("Image download error! {:?}", &img_to_download);
+        warn!("Image download error! {:?}", &img_to_download);
         Ok(None)
     } else {
         match image::load_from_memory(&buf) {
@@ -381,7 +381,7 @@ async fn get_hash_new(ctx: &UpdateWithCx<AutoSend<Bot>, Message>, img_to_downloa
                 Ok(hash)
             },
             Err(e) => {
-                error!("Failed to parse image: {:?}", &e);
+                warn!("Failed to parse image: {:?}", &e);
                 Ok(None)
             }
         }
@@ -420,7 +420,7 @@ async fn insert_img_hash(img_db: &Arc<Mutex<sled::Db>>, hash: &str, chat_id: &st
     let serialized_v = serde_json::to_string(&img_value).unwrap();
 
     if img_db.insert(serialized_k.as_bytes(), serialized_v.as_bytes()).is_err() {
-        error!("database seve error when saving key {:?} with value {:?}", &hash, &key);
+        warn!("database seve error when saving key {:?} with value {:?}", &hash, &key);
         false
     } else {
         true
@@ -439,7 +439,7 @@ async fn contains_img_hash(img_db: &Arc<Mutex<sled::Db>>, hash: &str, chat_id: &
 
     match img_db.contains_key(serialized_k.as_bytes()) {
         Err(_) => {
-            error!("database seve error when looking for key {:?}", &img_key);
+            warn!("database seve error when looking for key {:?}", &img_key);
             false
         },
         Ok(ans) => ans
@@ -463,7 +463,7 @@ async fn check_img_hash(img_db: &Arc<Mutex<sled::Db>>, hash: &str, chat_id: &str
 
     let now = Utc::now();
     let time_out_time = now.checked_sub_signed(Duration::days(TIME_OUT_DAYS)).unwrap();
-    let dry_run = true;
+    let dry_run = false;
 
     let mut best_hash: Option<ImageHash> = None;
     let mut best_dist: Option<u32> = None;
@@ -549,7 +549,7 @@ async fn check_img_hash(img_db: &Arc<Mutex<sled::Db>>, hash: &str, chat_id: &str
             } else {
                 match img_db.remove(&key){
                     Ok(_) => {info!("Successfully removing old key {:?} from img_db", &img_key);},
-                    Err(e) => {error!("Error in removing old key {:?} from img_db: {:?}", &img_key, &e);}
+                    Err(e) => {warn!("Error in removing old key {:?} from img_db: {:?}", &img_key, &e);}
                 }
             }
         }
@@ -574,7 +574,7 @@ fn touch_image(img_db: &MutexGuard<sled::Db>, chat_id: &str, hash_str: &ImageHas
         let serized_v = serde_json::to_string(&v).unwrap();
         match img_db.insert(serialized_key.as_bytes(), serized_v.as_bytes()) {
             Ok(_) => {info!("Timestamp upadted for {:?}", &best_key.hash_str)},
-            Err(_) => {error!("Timestamp update failed for {:?}", &best_key.hash_str)}
+            Err(_) => {warn!("Timestamp update failed for {:?}", &best_key.hash_str)}
         };
     }
     true
@@ -630,7 +630,7 @@ async fn reset_top_board(ctx: &UpdateWithCx<AutoSend<Bot>, Message>,
                     let value = serde_json::to_string(&value).unwrap();
 
                     if let Err(e) = top_db.insert(key.as_bytes(), value.as_bytes()) {
-                        error!("top database error {:?} when saving key {:?} with value {:?}", &e, &key, &value);
+                        warn!("top database error {:?} when saving key {:?} with value {:?}", &e, &key, &value);
                     }
                 }
             });
@@ -655,7 +655,7 @@ async fn update_top_board(top_db: &Arc<Mutex<sled::Db>>, chat_id: &str, user_id:
         let top_db = top_db.lock().await;
         match top_db.get(key.as_bytes()) {
             Err(e) => {
-                error!("top board database get error {:?} when looking for key {:?}", &e, &key);
+                warn!("top board database get error {:?} when looking for key {:?}", &e, &key);
             },
             Ok(value) => {
                 let mut previous_value: i64 = 0;
@@ -673,7 +673,7 @@ async fn update_top_board(top_db: &Arc<Mutex<sled::Db>>, chat_id: &str, user_id:
                 let value = serde_json::to_string(&value).unwrap();
 
                 if let Err(e) = top_db.insert(key.as_bytes(), value.as_bytes()) {
-                    error!("database seve error {:?} when saving key {:?} with value {:?}", &e, &key, &value);
+                    warn!("database seve error {:?} when saving key {:?} with value {:?}", &e, &key, &value);
                 }
             }
         }
@@ -829,7 +829,7 @@ async fn print_my_number(ctx: &UpdateWithCx<AutoSend<Bot>, Message>,
 
         match top_db.get(key.as_bytes()) {
             Err(e) => {
-                error!("top board database get error {:?} when looking for key {:?}", &e, &key);
+                warn!("top board database get error {:?} when looking for key {:?}", &e, &key);
             },
             Ok(Some(value)) => {
                     let value = String::from_utf8(value.to_vec()).unwrap();
@@ -885,7 +885,7 @@ async fn cleanup_img_db(img_db: &Arc<Mutex<sled::Db>>, chat_id: &str) -> Result<
                                     info!("Successfully removing {:?} from img_db", &img_key);
                                 },
                                 Err(e) => {
-                                    error!("Error in removing {:?} from img_db, error {:?}", &img_key, &e);
+                                    warn!("Error in removing {:?} from img_db, error {:?}", &img_key, &e);
                                 }
                             }
                         }
@@ -893,7 +893,7 @@ async fn cleanup_img_db(img_db: &Arc<Mutex<sled::Db>>, chat_id: &str) -> Result<
                 });
         }
     } else {
-        error!("Time parse failuer when cleaning up db!");
+        warn!("Time parse failuer when cleaning up db!");
     }
     Ok(())
 }
@@ -974,16 +974,16 @@ async fn parse_message(
                                 let key = MessageKey{chat_id: clean_chat_id.clone(), url:url.clone()};
                                 let ans = insert_img_hash(&img_db, &hash, &clean_chat_id, &key).await;
                                 if ! ans {
-                                    error!("insert error, with hash {:?} and key {:?}", &hash, &key);
+                                    warn!("insert error, with hash {:?} and key {:?}", &hash, &key);
                                 }
                             }
                         }
                     },
                     Ok(None) => {
-                        error!("Failed to get hash");
+                        warn!("Failed to get hash");
                     }
                     Err(e) => {
-                        error!("Get hash error {:?}", e);
+                        warn!("Get hash error {:?}", e);
                     }
                 };
             }
@@ -1045,7 +1045,7 @@ async fn delete_final_msg_accordingly(ctx: &UpdateWithCx<AutoSend<Bot>, Message>
             // info!("Get msg {:?}", &msg);
             // info!("Message was not deleted, delete the new forward");
             if let Err(e) = ctx.requester.delete_message(chat_id, msg.id).await {
-                error!("Delete failed with error {:?}", e);
+                warn!("Delete failed with error {:?}", e);
             };
         },
         Err(e) => {
@@ -1058,11 +1058,11 @@ async fn delete_final_msg_accordingly(ctx: &UpdateWithCx<AutoSend<Bot>, Message>
                     info!("The message was deleted, so we also delete our notification");
                 },
                 _ => {
-                    error!("Some other error detected: {:?}", e);
+                    warn!("Some other error detected: {:?}", e);
                 }
             }
             if let Err(e) =  ctx.requester.delete_message(chat_id, my_msg_id).await {
-                error!("Clean up chat {} message {} failed with error {:?}", chat_id, my_msg_id, e);
+                warn!("Clean up chat {} message {} failed with error {:?}", chat_id, my_msg_id, e);
             };
         }
     }
@@ -1190,7 +1190,7 @@ async fn run(db: Arc<Mutex<MyDB>>,
                             .instrument(debug_span!("parse_message"))
                             .await.err().map(
                             |e|
-                            error!("parse_message see error {:?}", e)
+                            warn!("parse_message see error {:?}", e)
                         );
                     }
                 },
@@ -1207,7 +1207,7 @@ fn get_env() {
     let admin_str = match env::var_os(&env_key) {
         Some(v) => v.into_string().unwrap(),
         None => {
-            error!("${} is not set", &env_key);
+            warn!("${} is not set", &env_key);
             String::from("0")
         }
     };
