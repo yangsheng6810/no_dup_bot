@@ -1225,9 +1225,10 @@ fn get_env() {
 #[tokio::main]
 async fn main() {
     get_env();
-    tracing_subscriber::fmt()
-        // .pretty()
-        .init();
+    tracing_subscriber::fmt::init();
+    // tracing_subscriber::fmt()
+    //     .pretty()
+    //     .init();
     let db = Arc::new(Mutex::new(MyDB::init("bot_db")));
     let img_db = Arc::new(Mutex::new(sled::open("img_db").unwrap()));
     let top_db = Arc::new(Mutex::new(sled::open("top_db").unwrap()));
