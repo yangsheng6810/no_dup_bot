@@ -211,7 +211,7 @@ impl KVStore for MyDB {
         let serialized_v = serde_json::to_string(&v).unwrap();
 
         if self.db.insert(serialized_k.as_bytes(), serialized_v.as_bytes()).is_err() {
-            info!("database seve error when saving key {:?} with value {:?}", &k, &v);
+            error!("database seve error when saving key {:?} with value {:?}", &k, &v);
             false
         } else {
             true
@@ -228,11 +228,11 @@ impl KVStore for MyDB {
                 Some(result)
             },
             Ok(None) => {
-                info!("Finding '{:?}' returns None", k);
+                info!("Message '{:?}' is not found", k);
                 None
             },
             Err(e) => {
-                info!("Error retrieving value for {:?}: {}", k, e);
+                error!("Error retrieving value for {:?}: {}", k, e);
                 None
             }
         }
@@ -287,7 +287,7 @@ fn get_forward_msg_link(message: &UpdateWithCx<AutoSend<Bot>, Message>) -> Optio
         debug!("&url is {:?}", &url);
         url
     } else {
-        info!("Parse forwarded message failed");
+        debug!("Parse forwarded message failed");
         debug!("chat is {:?}", chat);
         None
     }
@@ -371,7 +371,7 @@ async fn get_hash_new(ctx: &UpdateWithCx<AutoSend<Bot>, Message>, img_to_downloa
     }
     // info!("count is {:?}", count);
     if found_error {
-        info!("Image download error! {:?}", &img_to_download);
+        error!("Image download error! {:?}", &img_to_download);
         Ok(None)
     } else {
         match image::load_from_memory(&buf) {
@@ -420,7 +420,7 @@ async fn insert_img_hash(img_db: &Arc<Mutex<sled::Db>>, hash: &str, chat_id: &st
     let serialized_v = serde_json::to_string(&img_value).unwrap();
 
     if img_db.insert(serialized_k.as_bytes(), serialized_v.as_bytes()).is_err() {
-        info!("database seve error when saving key {:?} with value {:?}", &hash, &key);
+        error!("database seve error when saving key {:?} with value {:?}", &hash, &key);
         false
     } else {
         true
@@ -439,7 +439,7 @@ async fn contains_img_hash(img_db: &Arc<Mutex<sled::Db>>, hash: &str, chat_id: &
 
     match img_db.contains_key(serialized_k.as_bytes()) {
         Err(_) => {
-            info!("database seve error when looking for key {:?}", &img_key);
+            error!("database seve error when looking for key {:?}", &img_key);
             false
         },
         Ok(ans) => ans
@@ -893,7 +893,7 @@ async fn cleanup_img_db(img_db: &Arc<Mutex<sled::Db>>, chat_id: &str) -> Result<
                 });
         }
     } else {
-        info!("Time parse failuer when cleaning up db!");
+        error!("Time parse failuer when cleaning up db!");
     }
     Ok(())
 }
@@ -977,16 +977,16 @@ async fn parse_message(
                                 let key = MessageKey{chat_id: clean_chat_id.clone(), url:url.clone()};
                                 let ans = insert_img_hash(&img_db, &hash, &clean_chat_id, &key).await;
                                 if ! ans {
-                                    info!("insert error, with hash {:?} and key {:?}", &hash, &key);
+                                    error!("insert error, with hash {:?} and key {:?}", &hash, &key);
                                 }
                             }
                         }
                     },
                     Ok(None) => {
-                        info!("Failed to get hash");
+                        error!("Failed to get hash");
                     }
                     Err(e) => {
-                        info!("Get hash error {:?}", e);
+                        error!("Get hash error {:?}", e);
                     }
                 };
             }
@@ -1048,7 +1048,7 @@ async fn delete_final_msg_accordingly(ctx: &UpdateWithCx<AutoSend<Bot>, Message>
             // info!("Get msg {:?}", &msg);
             // info!("Message was not deleted, delete the new forward");
             if let Err(e) = ctx.requester.delete_message(chat_id, msg.id).await {
-                info!("Delete failed with error {:?}", e);
+                error!("Delete failed with error {:?}", e);
             };
         },
         Err(e) => {
@@ -1061,11 +1061,11 @@ async fn delete_final_msg_accordingly(ctx: &UpdateWithCx<AutoSend<Bot>, Message>
                     info!("The message was deleted, so we also delete our notification");
                 },
                 _ => {
-                    info!("Some other error detected: {:?}", e);
+                    error!("Some other error detected: {:?}", e);
                 }
             }
             if let Err(e) =  ctx.requester.delete_message(chat_id, my_msg_id).await {
-                info!("Clean up chat {} message {} failed with error {:?}", chat_id, my_msg_id, e);
+                error!("Clean up chat {} message {} failed with error {:?}", chat_id, my_msg_id, e);
             };
         }
     }
@@ -1191,7 +1191,7 @@ async fn run(db: Arc<Mutex<MyDB>>,
                         // teloxide seem to want a RequestError, while we would want a general Error
                         parse_message(&ctx, db, img_db, top_db).await.err().map(
                             |e|
-                            info!("parse_message see error {:?}", e)
+                            error!("parse_message see error {:?}", e)
                         );
                     }
                 },
