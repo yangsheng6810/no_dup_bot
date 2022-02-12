@@ -20,7 +20,7 @@ use std::collections::HashSet;
 
 use std::env;
 use once_cell::sync::OnceCell;
-use tracing::{debug, error, info, span, warn, Level};
+use tracing::{debug, debug_span, error, info, span, warn, Level, Instrument};
 use tracing_subscriber;
 
 static BOT_NAME: &str = "no_dup_bot";
@@ -904,9 +904,6 @@ async fn parse_message(
     img_db: Arc<Mutex<sled::Db>>,
     top_db: Arc<Mutex<sled::Db>>
 ) -> Result<()> {
-    let parse_message_span = span!(Level::INFO, "message handling");
-    let _enter = parse_message_span.enter();
-
     let mut url: Option<Url>;
     let link = get_msg_link(&ctx);
     let clean_chat_id = get_chat_id(&ctx);
@@ -1189,7 +1186,9 @@ async fn run(db: Arc<Mutex<MyDB>>,
                         // TODO: think of a better way to do it.
                         // Currently decided to suppress this error.
                         // teloxide seem to want a RequestError, while we would want a general Error
-                        parse_message(&ctx, db, img_db, top_db).await.err().map(
+                        parse_message(&ctx, db, img_db, top_db)
+                            .instrument(debug_span!("parse_message"))
+                            .await.err().map(
                             |e|
                             error!("parse_message see error {:?}", e)
                         );
@@ -1226,7 +1225,9 @@ fn get_env() {
 #[tokio::main]
 async fn main() {
     get_env();
-    tracing_subscriber::fmt::init();
+    tracing_subscriber::fmt()
+        // .pretty()
+        .init();
     let db = Arc::new(Mutex::new(MyDB::init("bot_db")));
     let img_db = Arc::new(Mutex::new(sled::open("img_db").unwrap()));
     let top_db = Arc::new(Mutex::new(sled::open("top_db").unwrap()));
