@@ -20,6 +20,7 @@ use std::collections::HashSet;
 
 use std::env;
 use once_cell::sync::OnceCell;
+use log::{debug, error, log_enabled, info, Level};
 
 static BOT_NAME: &str = "no_dup_bot";
 static ADMIN: OnceCell<HashSet<i64>> = OnceCell::new();
@@ -76,7 +77,7 @@ fn is_admin(cx: &UpdateWithCx<AutoSend<Bot>, Message>) -> bool {
     if let Some(user) = cx.update.from() {
         // dbg!(user);
         if admin_db.contains(&user.id) {
-            println!("Admin {:?} confirmed", &user.id);
+            info!("Admin {:?} confirmed", &user.id);
             return true
         }
     }
@@ -85,10 +86,10 @@ fn is_admin(cx: &UpdateWithCx<AutoSend<Bot>, Message>) -> bool {
 
 fn allows_delete(cx: &UpdateWithCx<AutoSend<Bot>, Message>) -> bool {
     if is_admin(&cx) {
-        println!("Deleting message as directed by admin");
+        info!("Deleting message as directed by admin");
         return true
     }
-    println!("Admin not match!");
+    info!("Admin not match!");
 
     // TODO: should return false, but we can not reliably detect come from
     // original author, so we temporarily always return true
@@ -117,7 +118,7 @@ async fn delete_replied_msg(cx: &UpdateWithCx<AutoSend<Bot>, Message>)
             if let Some(usr) = message.from() {
                 if let Some(username) = &usr.username {
                     if username.eq(BOT_NAME) {
-                        println!("Start deleting message");
+                        info!("Start deleting message");
                         if allows_delete(cx) {
                             cx.requester
                               .delete_message(cx.update.chat_id(), message.id)
@@ -126,11 +127,11 @@ async fn delete_replied_msg(cx: &UpdateWithCx<AutoSend<Bot>, Message>)
                     }
                 }
             } else {
-                println!("Trying to delete a message without user");
+                info!("Trying to delete a message without user");
             }
         }
         None => {
-            // println!("Use this command in a reply to another message!");
+            // info!("Use this command in a reply to another message!");
             cx.reply_to("Please reply to a message sent by the bot!").send().await?;
         }
     }
@@ -209,7 +210,7 @@ impl KVStore for MyDB {
         let serialized_v = serde_json::to_string(&v).unwrap();
 
         if self.db.insert(serialized_k.as_bytes(), serialized_v.as_bytes()).is_err() {
-            println!("database seve error when saving key {:?} with value {:?}", &k, &v);
+            info!("database seve error when saving key {:?} with value {:?}", &k, &v);
             false
         } else {
             true
@@ -221,16 +222,16 @@ impl KVStore for MyDB {
         match self.db.get(serialized_k.as_bytes()) {
             Ok(Some(v)) => {
                 let result = String::from_utf8(v.to_vec()).unwrap();
-                println!("Finding '{:?}' returns '{}'", k, result);
+                info!("Finding '{:?}' returns '{}'", k, result);
                 let result: MessageInfo = serde_json::from_str(&result).unwrap();
                 Some(result)
             },
             Ok(None) => {
-                println!("Finding '{:?}' returns None", k);
+                info!("Finding '{:?}' returns None", k);
                 None
             },
             Err(e) => {
-                println!("Error retrieving value for {:?}: {}", k, e);
+                info!("Error retrieving value for {:?}: {}", k, e);
                 None
             }
         }
@@ -285,7 +286,7 @@ fn get_forward_msg_link(message: &UpdateWithCx<AutoSend<Bot>, Message>) -> Optio
         dbg!(&url);
         url
     } else {
-        println!("Parse forwarded message failed");
+        info!("Parse forwarded message failed");
         dbg!(chat);
         None
     }
@@ -322,13 +323,13 @@ fn filter_url(ctx: &UpdateWithCx<AutoSend<Bot>, Message>, url: Option<Url>) -> O
                             if let Some(message_chat_id) = url_chat_id  {
                                 if message_chat_id == chat_id {
                                     filtered_out = true;
-                                    println!("Url {} gets filtered out with chat id {}", url, message_chat_id);
+                                    info!("Url {} gets filtered out with chat id {}", url, message_chat_id);
                                 }
                             }
                         },
                         // filter out joinchat messages
                         Some("joinchat") => {
-                            println!("Url {} gets filtered out since it is a joinchat", url);
+                            info!("Url {} gets filtered out since it is a joinchat", url);
                             filtered_out = true;
                         },
                         _ => {}
@@ -367,9 +368,9 @@ async fn get_hash_new(ctx: &UpdateWithCx<AutoSend<Bot>, Message>, img_to_downloa
             }
         }
     }
-    // println!("count is {:?}", count);
+    // info!("count is {:?}", count);
     if found_error {
-        println!("Image download error! {:?}", &img_to_download);
+        info!("Image download error! {:?}", &img_to_download);
         Ok(None)
     } else {
         match image::load_from_memory(&buf) {
@@ -379,7 +380,7 @@ async fn get_hash_new(ctx: &UpdateWithCx<AutoSend<Bot>, Message>, img_to_downloa
                 Ok(hash)
             },
             Err(e) => {
-                println!("Failed to parse image: {:?}", &e);
+                info!("Failed to parse image: {:?}", &e);
                 Ok(None)
             }
         }
@@ -418,7 +419,7 @@ async fn insert_img_hash(img_db: &Arc<Mutex<sled::Db>>, hash: &str, chat_id: &st
     let serialized_v = serde_json::to_string(&img_value).unwrap();
 
     if img_db.insert(serialized_k.as_bytes(), serialized_v.as_bytes()).is_err() {
-        println!("database seve error when saving key {:?} with value {:?}", &hash, &key);
+        info!("database seve error when saving key {:?} with value {:?}", &hash, &key);
         false
     } else {
         true
@@ -437,7 +438,7 @@ async fn contains_img_hash(img_db: &Arc<Mutex<sled::Db>>, hash: &str, chat_id: &
 
     match img_db.contains_key(serialized_k.as_bytes()) {
         Err(_) => {
-            println!("database seve error when looking for key {:?}", &img_key);
+            info!("database seve error when looking for key {:?}", &img_key);
             false
         },
         Ok(ans) => ans
@@ -494,7 +495,7 @@ async fn check_img_hash(img_db: &Arc<Mutex<sled::Db>>, hash: &str, chat_id: &str
                     if img_value.timestamp < time_out_time {
                         old_img_set.insert(key.clone());
                     } else {
-                        // println!("Saw {:?} {:?}", &key, &value);
+                        // info!("Saw {:?} {:?}", &key, &value);
                         let iter_hash = ImageHash::from_base64(&iter_hash).unwrap();
                         let dist = iter_hash.dist(&hash);
                         match best_dist {
@@ -517,14 +518,14 @@ async fn check_img_hash(img_db: &Arc<Mutex<sled::Db>>, hash: &str, chat_id: &str
     }
     let match_ans = match best_dist {
         Some(dist) => {
-            println!("The best distance is {} among all {} entries", dist, count);
+            info!("The best distance is {} among all {} entries", dist, count);
             if dist < similarity_threshold {
                 // the best match should update its timestamp, and removed from old img set
                 if let Some(best_hash) = best_hash.clone() {
                     touch_image(&img_db, &chat_id, &best_hash, &mut old_img_set);
                 }
-                best_hash.map(|h| println!("Use this hash! {:?}", h.to_base64()));
-                best_url.as_ref().map(|u| println!("with url {:?}", u));
+                best_hash.map(|h| info!("Use this hash! {:?}", h.to_base64()));
+                best_url.as_ref().map(|u| info!("with url {:?}", u));
                 Ok(best_url)
             } else {
                 Ok(None)
@@ -541,11 +542,11 @@ async fn check_img_hash(img_db: &Arc<Mutex<sled::Db>>, hash: &str, chat_id: &str
             let img_key = serde_json::from_str::<ImageKey>(
                 &String::from_utf8(key.to_vec()).unwrap()).unwrap();
             if dry_run {
-                println!("Dry run remove old key {:?}", &img_key)
+                info!("Dry run remove old key {:?}", &img_key)
             } else {
                 match img_db.remove(&key){
-                    Ok(_) => {println!("Successfully removing old key {:?} from img_db", &img_key);},
-                    Err(e) => {println!("Error in removing old key {:?} from img_db: {:?}", &img_key, &e);}
+                    Ok(_) => {info!("Successfully removing old key {:?} from img_db", &img_key);},
+                    Err(e) => {info!("Error in removing old key {:?} from img_db: {:?}", &img_key, &e);}
                 }
             }
         }
@@ -569,8 +570,8 @@ fn touch_image(img_db: &MutexGuard<sled::Db>, chat_id: &str, hash_str: &ImageHas
         v.timestamp = Utc::now();
         let serized_v = serde_json::to_string(&v).unwrap();
         match img_db.insert(serialized_key.as_bytes(), serized_v.as_bytes()) {
-            Ok(_) => {println!("Timestamp upadted for {:?}", &best_key.hash_str)},
-            Err(_) => {println!("Timestamp update failed for {:?}", &best_key.hash_str)}
+            Ok(_) => {info!("Timestamp upadted for {:?}", &best_key.hash_str)},
+            Err(_) => {info!("Timestamp update failed for {:?}", &best_key.hash_str)}
         };
     }
     true
@@ -626,7 +627,7 @@ async fn reset_top_board(ctx: &UpdateWithCx<AutoSend<Bot>, Message>,
                     let value = serde_json::to_string(&value).unwrap();
 
                     if let Err(e) = top_db.insert(key.as_bytes(), value.as_bytes()) {
-                        println!("top database error {:?} when saving key {:?} with value {:?}", &e, &key, &value);
+                        info!("top database error {:?} when saving key {:?} with value {:?}", &e, &key, &value);
                     }
                 }
             });
@@ -651,13 +652,13 @@ async fn update_top_board(top_db: &Arc<Mutex<sled::Db>>, chat_id: &str, user_id:
         let top_db = top_db.lock().await;
         match top_db.get(key.as_bytes()) {
             Err(e) => {
-                println!("top board database get error {:?} when looking for key {:?}", &e, &key);
+                info!("top board database get error {:?} when looking for key {:?}", &e, &key);
             },
             Ok(value) => {
                 let mut previous_value: i64 = 0;
                 if let Some(value) = value {
                     let value = String::from_utf8(value.to_vec()).unwrap();
-                    println!("In top db, finding '{:?}' returns '{}'", &key, &value);
+                    info!("In top db, finding '{:?}' returns '{}'", &key, &value);
                     let previous_user_value = serde_json::from_str::<TopUserValue>(&value).unwrap();
                     previous_value = previous_user_value.count;
                 }
@@ -669,7 +670,7 @@ async fn update_top_board(top_db: &Arc<Mutex<sled::Db>>, chat_id: &str, user_id:
                 let value = serde_json::to_string(&value).unwrap();
 
                 if let Err(e) = top_db.insert(key.as_bytes(), value.as_bytes()) {
-                    println!("database seve error {:?} when saving key {:?} with value {:?}", &e, &key, &value);
+                    info!("database seve error {:?} when saving key {:?} with value {:?}", &e, &key, &value);
                 }
             }
         }
@@ -825,11 +826,11 @@ async fn print_my_number(ctx: &UpdateWithCx<AutoSend<Bot>, Message>,
 
         match top_db.get(key.as_bytes()) {
             Err(e) => {
-                println!("top board database get error {:?} when looking for key {:?}", &e, &key);
+                info!("top board database get error {:?} when looking for key {:?}", &e, &key);
             },
             Ok(Some(value)) => {
                     let value = String::from_utf8(value.to_vec()).unwrap();
-                    println!("In top db, finding '{:?}' returns '{}'", &key, &value);
+                    info!("In top db, finding '{:?}' returns '{}'", &key, &value);
                     let value = serde_json::from_str::<TopUserValue>(&value).unwrap();
                     if value.count > 0 {
                         final_msg.push_str(format!("您已经火星{}次了！", value.count).as_str());
@@ -878,10 +879,10 @@ async fn cleanup_img_db(img_db: &Arc<Mutex<sled::Db>>, chat_id: &str) -> Result<
                         if img_value.timestamp < time_out_time {
                             match img_db.remove(&key){
                                 Ok(_) => {
-                                    println!("Successfully removing {:?} from img_db", &img_key);
+                                    info!("Successfully removing {:?} from img_db", &img_key);
                                 },
                                 Err(e) => {
-                                    println!("Error in removing {:?} from img_db, error {:?}", &img_key, &e);
+                                    info!("Error in removing {:?} from img_db, error {:?}", &img_key, &e);
                                 }
                             }
                         }
@@ -889,7 +890,7 @@ async fn cleanup_img_db(img_db: &Arc<Mutex<sled::Db>>, chat_id: &str) -> Result<
                 });
         }
     } else {
-        println!("Time parse failuer when cleaning up db!");
+        info!("Time parse failuer when cleaning up db!");
     }
     Ok(())
 }
@@ -915,23 +916,23 @@ async fn parse_message(
     match (is_forward(&ctx), is_image(&ctx)) {
         (true, false) => {
             // is a forward message
-            println!("Found a forwarded message");
+            info!("Found a forwarded message");
             url = get_forward_msg_link(&ctx);
             if url.is_none(){
-                println!("Forwarded message link parse failure.")
+                info!("Forwarded message link parse failure.")
             }
         },
         // (true, true) => {
         //     // is a forward and an image
-        //     println!("Found an image message that is also forward");
+        //     info!("Found an image message that is also forward");
         //     url = get_forward_msg_link(&ctx);
         //     if url.is_none(){
-        //         println!("Forwarded message link parse failure.")
+        //         info!("Forwarded message link parse failure.")
         //     }
         // },
         (_, true) => {
             // is an image, but not forward
-            println!("Found an image message that is not a forward");
+            info!("Found an image message that is not a forward");
             url = None;
             let img_vec = ctx.update.photo()
                                     .ok_or(Error::new(ErrorKind::Other, "failed to download img_vec"))?;
@@ -952,14 +953,14 @@ async fn parse_message(
             if let Some(img) = img_to_download {
                 match get_hash_new(&ctx, &img).await {
                     Ok(Some(hash)) => {
-                        println!("Get hash {}", &hash);
+                        info!("Get hash {}", &hash);
                         match check_img_hash(&img_db, &hash, &clean_chat_id).await {
                             Ok(Some(key)) => {
-                                println!("Found existing hash {:?} that is close", key.url);
+                                info!("Found existing hash {:?} that is close", key.url);
                                 url = Some(key.url.clone());
                             },
                             _ => {
-                                println!("No close hash is found, use original hash {:?}", &hash);
+                                info!("No close hash is found, use original hash {:?}", &hash);
                                 url = Url::parse(&format!("https://img.telegram.com/{}", hash.clone())).ok();
                             }
                         }
@@ -969,26 +970,26 @@ async fn parse_message(
                                 let key = MessageKey{chat_id: clean_chat_id.clone(), url:url.clone()};
                                 let ans = insert_img_hash(&img_db, &hash, &clean_chat_id, &key).await;
                                 if ! ans {
-                                    println!("insert error, with hash {:?} and key {:?}", &hash, &key);
+                                    info!("insert error, with hash {:?} and key {:?}", &hash, &key);
                                 }
                             }
                         }
                     },
                     Ok(None) => {
-                        println!("Failed to get hash");
+                        info!("Failed to get hash");
                     }
                     Err(e) => {
-                        println!("Get hash error {:?}", e);
+                        info!("Get hash error {:?}", e);
                     }
                 };
             }
         },
         (false, false) => {
             // not forward nor image, only interested in pure url
-            // println!("Found a non-forward, non-image message");
+            // info!("Found a non-forward, non-image message");
             url = get_url(&ctx);
             if url.is_none(){
-                println!("Non-forwarded message link parse failure.")
+                info!("Non-forwarded message link parse failure.")
             }
             url = filter_url(&ctx, url);
         }
@@ -1004,13 +1005,13 @@ async fn parse_message(
             db.save(&key, &info);
             update_top_board(&top_db, &clean_chat_id, &user_id, &username).await;
             // ctx.answer(format!("See it {} times", info.count)).await?;
-            println!("See it {} times", info.count);
+            info!("See it {} times", info.count);
             let link_msg = &info.link.map_or(
                 format!("第一次出现是在private chat"),
                 |url| format!("第一次出现是在：{}", url));
             // ctx.answer(&link_msg).await?;
             let final_msg = format!("你火星了！这条消息是第{}次来到本群了，快去爬楼。{}", info.count, link_msg);
-            println!("{}", &final_msg);
+            info!("{}", &final_msg);
             if let Ok(msg) = ctx.reply_to(final_msg).await {
                 my_msg_id = Some(msg.id);
             }
@@ -1020,7 +1021,7 @@ async fn parse_message(
             db.save(&key, &value);
         };
     } else {
-        get_text(&ctx).map(|text| println!("Pong, {}", text));
+        get_text(&ctx).map(|text| info!("Pong, {}", text));
     }
     // delete my message if the message we replied to gets deleted
     if let Some(my_msg_id) = my_msg_id {
@@ -1037,27 +1038,27 @@ async fn delete_final_msg_accordingly(ctx: &UpdateWithCx<AutoSend<Bot>, Message>
     match ctx.requester.forward_message(chat_id, chat_id, msg_id).await {
         Ok(msg) => {
             // // message was not deleted
-            // println!("Get msg {:?}", &msg);
-            // println!("Message was not deleted, delete the new forward");
+            // info!("Get msg {:?}", &msg);
+            // info!("Message was not deleted, delete the new forward");
             if let Err(e) = ctx.requester.delete_message(chat_id, msg.id).await {
-                println!("Delete failed with error {:?}", e);
+                info!("Delete failed with error {:?}", e);
             };
         },
         Err(e) => {
             // unknown error
-            println!("The attempt to forward the message failed");
+            info!("The attempt to forward the message failed");
              match e {
                  RequestError::ApiError{kind, status_code:_}
                  if kind == ApiError::MessageToForwardNotFound ||
                      kind == ApiError::MessageIdInvalid => {
-                    println!("The message was deleted, so we also delete our notification");
+                    info!("The message was deleted, so we also delete our notification");
                 },
                 _ => {
-                    println!("Some other error detected: {:?}", e);
+                    info!("Some other error detected: {:?}", e);
                 }
             }
             if let Err(e) =  ctx.requester.delete_message(chat_id, my_msg_id).await {
-                println!("Clean up chat {} message {} failed with error {:?}", chat_id, my_msg_id, e);
+                info!("Clean up chat {} message {} failed with error {:?}", chat_id, my_msg_id, e);
             };
         }
     }
@@ -1124,31 +1125,31 @@ async fn action(
 ) -> Result<(), RequestError> {
     match command {
         Command::Help => {
-            println!("Handling help request");
+            info!("Handling help request");
             ctx.answer(Command::descriptions()).send().await.map(|_| ())?
         },
         Command::Delete => {
-            println!("Handling delete request");
+            info!("Handling delete request");
             delete_replied_msg(&ctx).await?
         },
         Command::Top => {
-            println!("Handling top board request");
+            info!("Handling top board request");
             let chat_id = get_chat_id(&ctx);
             print_top_board(&ctx, &top_db, &chat_id).await;
         },
         Command::Topics => {
-            println!("Show topics");
+            info!("Show topics");
             let chat_id = get_chat_id(&ctx);
             print_topics(&ctx, db, &chat_id).await;
         },
         Command::Me => {
-            println!("Handling me request");
+            info!("Handling me request");
             print_my_number(&ctx, &top_db).await;
         },
         Command::ResetTop => {
-            println!("Handling ResetTop request");
+            info!("Handling ResetTop request");
             if is_admin(&ctx) {
-                println!("Resetting top board for current chat");
+                info!("Resetting top board for current chat");
                 reset_top_board(&ctx, &top_db).await;
             }
         }
@@ -1175,7 +1176,7 @@ async fn run(db: Arc<Mutex<MyDB>>,
         async move {
             match handle_command(&ctx, db.clone(), top_db.clone()).await {
                 Ok(true) => {
-                    println!("Command handled successfully");
+                    info!("Command handled successfully");
                 },
                 Ok(false) | Err(_) => {
                     if need_handle(&ctx) {
@@ -1184,7 +1185,7 @@ async fn run(db: Arc<Mutex<MyDB>>,
                         // teloxide seem to want a RequestError, while we would want a general Error
                         parse_message(&ctx, db, img_db, top_db).await.err().map(
                             |e|
-                            println!("parse_message see error {:?}", e)
+                            info!("parse_message see error {:?}", e)
                         );
                     }
                 },
@@ -1201,7 +1202,7 @@ fn get_env() {
     let admin_str = match env::var_os(&env_key) {
         Some(v) => v.into_string().unwrap(),
         None => {
-            println!("${} is not set", &env_key);
+            info!("${} is not set", &env_key);
             String::from("0")
         }
     };
@@ -1219,6 +1220,7 @@ fn get_env() {
 #[tokio::main]
 async fn main() {
     get_env();
+    env_logger::init();
     let db = Arc::new(Mutex::new(MyDB::init("bot_db")));
     let img_db = Arc::new(Mutex::new(sled::open("img_db").unwrap()));
     let top_db = Arc::new(Mutex::new(sled::open("top_db").unwrap()));
