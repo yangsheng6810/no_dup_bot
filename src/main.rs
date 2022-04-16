@@ -20,7 +20,7 @@ use std::collections::HashSet;
 
 use std::env;
 use once_cell::sync::OnceCell;
-use tracing::{debug, debug_span, info, span, warn, Level, Instrument};
+use tracing::{debug, debug_span, info, span, warn, trace, Level, Instrument};
 use tracing_subscriber;
 
 static BOT_NAME: &str = "no_dup_bot";
@@ -898,7 +898,8 @@ async fn cleanup_img_db(img_db: &Arc<Mutex<sled::Db>>, chat_id: &str) -> Result<
     Ok(())
 }
 
-async fn parse_message(
+async fn
+parse_message(
     ctx: &UpdateWithCx<AutoSend<Bot>, Message>,
     db: Arc<Mutex<MyDB>>,
     img_db: Arc<Mutex<sled::Db>>,
@@ -921,9 +922,9 @@ async fn parse_message(
             // is a forward message
             url = get_forward_msg_link(&ctx);
             if url.is_some(){
-                debug!("Found a forwarded channel message");
+                trace!("Found a forwarded channel message");
             } else {
-                debug!("Forwarded message link parse failure.")
+                trace!("Forwarded message link parse failure.")
             }
         },
         // (true, true) => {
@@ -936,7 +937,7 @@ async fn parse_message(
         // },
         (_, true) => {
             // is an image, but not forward
-            info!("Found an image message that is not a channel forward");
+            trace!("Found an image message that is not a channel forward");
             url = None;
             let img_vec = ctx.update.photo()
                                     .ok_or(Error::new(ErrorKind::Other, "failed to download img_vec"))?;
@@ -957,14 +958,14 @@ async fn parse_message(
             if let Some(img) = img_to_download {
                 match get_hash_new(&ctx, &img).await {
                     Ok(Some(hash)) => {
-                        info!("Get hash {}", &hash);
+                        trace!("Get hash {}", &hash);
                         match check_img_hash(&img_db, &hash, &clean_chat_id).await {
                             Ok(Some(key)) => {
                                 info!("Found existing hash {:?} that is close", key.url);
                                 url = Some(key.url.clone());
                             },
                             _ => {
-                                info!("No close hash is found, use original hash {:?}", &hash);
+                                trace!("No close hash is found, use original hash {:?}", &hash);
                                 url = Url::parse(&format!("https://img.telegram.com/{}", hash.clone())).ok();
                             }
                         }
@@ -1186,8 +1187,27 @@ async fn run(db: Arc<Mutex<MyDB>>,
                         // TODO: think of a better way to do it.
                         // Currently decided to suppress this error.
                         // teloxide seem to want a RequestError, while we would want a general Error
+                        let chat_id = ctx.update.id;
+                        let group_title = ctx.update.chat.title();
+
+                        let username: Option<&str>;
+                        let user = match ctx.update.from() {
+                            Some(user) => {
+                                username = Some(&user.first_name);
+                                Some(user.id)
+                            },
+                            _ => {
+                                username = None;
+                                None
+                            }
+                        };
+                        let group_span = span!(Level::INFO, "group",
+                                               id = &chat_id,
+                                               name = &group_title,
+                                               by = &user,
+                                               username = &username);
                         parse_message(&ctx, db, img_db, top_db)
-                            .instrument(debug_span!("parse_message"))
+                            .instrument(group_span)
                             .await.err().map(
                             |e|
                             warn!("parse_message see error {:?}", e)
