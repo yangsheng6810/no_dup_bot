@@ -5,18 +5,116 @@ A Telegram bot that shouts out when some channel message is forwarded to a group
 We love to forward all kinds of messages (usually some kind of news) to group chats, and the messages sometimes lead to nice discussions. However, a same message may be forwarded multiple times, usually by users who didn't see the first forward and discussion. It soon becomes frustrating: people who saw its previously feel the forwarder wasn't reading discussion history, while the new forwarder has no idea that it was forwarded before. This bot detects the later forwards, reply to those with a link to the first forwarded message in the current group.
 
 * Design
- Currently, the bot reacts to either
+Currently, the bot reacts to either
  - a message that is a URL,
  - a message forwarded from a public channel.
 
 It does not reacts to
-- a message forwarded from another group,
-- a message forwarded from the current group (This is by design, as it is a very common practice known as “复读机”),
-- a message from a private chat.
+ - a message forwarded from another group,
+ - a message forwarded from the current group (This is by design, as it is a very common practice known as “复读机”),
+ - a message from a private chat.
 
 When a message is forwarded into the current group, we obtain a link to the original message from the public channel. Previously seen links are stored in a KV store with some other information, including the number of times we have seen it in the current group.  If we have seen new link before, we increase its count, reply to the message with the link. Otherwise, we just store it in the KV store with a count of one. To have separate counting for different group, the id of the group is also part of the key. The handling of a URL is similar.
 
-* Plans
- - React to the reappearance of a picture: some say there is a unique ID for images in Telegram. If one is forwarded (possibly not from a public channel), we can detect it with the ID
- - Reply ~/delete~ to a message by the bot, and delete that message. There are quite some obstacles in making it work, under the rust based Telegram Bot framework [[https://github.com/teloxide/teloxide][teloxide]]
+* Deployment
 
+The instructions below shows how to deploy your bot on a Ubuntu 20.04 LTS server.
+
+** Prepare the bot
+
+First of all, you must have a Telegram bot. You can apply for one by talking with [[https://t.me/BotFather][@BotFather]]. See [[https://core.telegram.org/bots/features#creating-a-new-bot][official documentation]] for more information.
+
+The bot is supposed to be used in a group, so add the bot to a group before using. Then, check the following settings of the bot in =BotFather - /mybots - @your_bot - Bot Settings=:
+ - Set =Allow Groups?= as =off= after adding your bot to your group. This will make sure only the users in your group can use the bot.
+ - [[https://core.telegram.org/bots/features#privacy-mode][Group Privacy]] should be =disabled=. This will make sure your bot has access to the group messages.
+
+For convience, you can also set supported commands in [[https://t.me/BotFather][@BotFather]], so that Telegram will suggest a list of supported commands with descriptions to help the user enter commands quickly when the user enters a =/= in the group. 
+To set this, enter =/setcommands= in [[https://t.me/BotFather][@BotFather]], and choose your bot username. Copy the following texts and send them to =BotFather=, and the setting will be effective in several minutes.
+
+#+BEGIN_EXAMPLE 
+help - Get help
+delete - [admin only] Reply to a bot message to delete it
+top - Show users with most duplicated messages
+topics - Show most duplicated messages
+me - Show the number of duplicate messages I sent
+resettop - [admin only] Reset the top record for the current chat
+#+END_EXAMPLE
+
+
+** Get the code
+
+#+BEGIN_SRC sh
+git clone https://github.com/yangsheng6810/no_dup_bot.git
+cd no_dup_bot # Assume this folder is in <YOUR_PATH>.
+#+END_SRC
+
+** Install Rust and dependencies
+
+#+BEGIN_SRC sh
+curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
+sudo apt-get update
+sudo apt install build-essential pkg-config libssl-dev
+#+END_SRC
+
+
+** Modify & build the bot
+
+First, you need to modify =no_dup_bot= in [[https://github.com/yangsheng6810/no_dup_bot/blob/master/src/main.rs#L26][L26]] of =main.rs= to your own bot username (i.e., the one that ends with =bot=). 
+
+#+BEGIN_SRC Rust
+static BOT_NAME: &str = "no_dup_bot";
+#+END_SRC
+
+Then you can start to build the bot.
+
+#+BEGIN_SRC sh
+cargo check # Check the bot package and all of its dependencies for errors.
+cargo build --release
+cd <YOUR_PATH>/no_dup_bot/target/release
+#+END_SRC
+
+** Setup environment variables and start the bot
+
+Get =<YOUR_BOT_TOKEN>= from [[https://t.me/BotFather][@BotFather]], and get =<ADMIN_USER_ID>= from [[https://t.me/userinfobot][@userinfobot]].
+
+#+BEGIN_SRC sh
+export TELOXIDE_TOKEN=<YOUR_BOT_TOKEN>
+export NO_DUP_BOT_ADMIN=<ADMIN_USER_ID>
+#+END_SRC
+
+Finally, start the bot and enjoy it!
+
+#+BEGIN_SRC sh
+cd <YOUR PATH>/no_dup_bot/target/release && ./no_dup_bot
+#+END_SRC
+
+
+* Usage
+
+Use the following command format in a group to interact with the bot.
+
+#+BEGIN_EXAMPLE 
+/<COMMAND> @<YOUR_BOT_USERNAME>
+#+END_EXAMPLE
+
+For example, assume that your bot username is =no_dup_bot=, then you can use the following command in a group to show the help messages.
+
+#+BEGIN_EXAMPLE 
+/help @no_dup_bot
+#+END_EXAMPLE
+
+You will see the following reply:
+
+#+BEGIN_EXAMPLE 
+These commands are supported:
+/help - Get help
+/delete - Reply to a bot message to delete it
+/top - Show users with most duplicated messages
+/topics - Show most duplicated messages
+/me - Show the number of duplicate messages I sent
+/resettop - Reset the top record for the current chat
+#+END_EXAMPLE
+
+When you send a command to the bot by replying to a bot's message, you only need to send =/<COMMAND>=. 
+
+If you already tell =BotFather= the commands supported by the bot (see [[#prepare-the-bot][Prepare the bot]]), you only need to enter a =/=, and Telegram will suggest all the available commands to help you enter the entire command quickly.

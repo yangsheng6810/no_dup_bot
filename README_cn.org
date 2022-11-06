@@ -1,19 +1,117 @@
 #+TITLE: 火星 Bot
-一个 Telegram Bot，在群里反复收到群友转发同一个频道消息时提醒他火星了，并且把之前转发消息的链接拍在他脸上。 [[README.org][English Readme]]
+一个 Telegram bot，在群里反复收到群友转发同一个频道消息时提醒他火星了，并且把之前转发消息的链接拍在他脸上。 [[README.org][English Readme]]
 
 * 设计
-本 Bot 设计对下述转发做出反应：
+本 bot 设计对下述转发做出反应：
 - 整条消息都是一个 URL
 - 消息转发自一个 *公开频道*
 
 
-本 Bot 不对下述转发做出反应：
+本 bot 不对下述转发做出反应：
 - 消息转发自其他群
 - 消息转发自 *本群* 。避免群友“转发复读机”
 - 消息转发自 *私有频道*
 
   当一条消息被转发到当前群组时，我们获取一个指向原频道中该消息的链接。之前看到的链接作为 key 存在一个 KV store 里，其值包括看到的次数。如果新消息的链接在 KV store 中可以找到，那么说明我们见过这条消息，应该增加计数，并且把之前转发消息的链接拍在他脸上。如果没看见，就默默记下来，次数为 1。URL 链接的处理与之类似。
 
-* 计划
-- 支持对重复出现的图片做出反应。有人说 Telegram 里存储的图片是有唯一 ID 的，大概可以用
-- 使用 ~/delete~ 回复 Bot 的一条消息时，删除被回复的消息。目前实现存在一些技术障碍
+* 部署
+
+如下是一个将本 bot 部署在一台 Ubuntu 20.04 LTS 服务器的例子。
+
+** 准备 bot
+
+要开始火星救援，你必须通过 [[https://t.me/BotFather][@BotFather]] 申请一个 Telegram bot。阅读[[https://core.telegram.org/bots/features#creating-a-new-bot][官方文档]]以获取更多信息。
+
+本 bot 设计为在群组中使用。将 bot 加入你的群组后，在 =BotFather - /mybots - @your_bot - Bot Settings= 中检查 bot 的如下设置：
+ - 在你已将 bot 加入你的群组的情况下，=Allow Groups?= 需设置为 =off=。这将避免你的 bot 被其他人滥用。
+ - [[https://core.telegram.org/bots/features#privacy-mode][Group Privacy]] 需设置为 =disabled=。 这将保证 bot 有足够的权限访问群组内的消息。
+
+方便起见，你可以告诉 [[https://t.me/BotFather][@BotFather]] 此 bot 所支持的命令，这样当用户在群组中输入 =/= 时，Telegram 会提供命令的自动补全功能。
+只需进入 [[https://t.me/BotFather][@BotFather]] 后输入 =/setcommands=，再选择你 bot 的 username，最后复制下列文本并发送即可完成设置。设置会在几分钟后生效。
+
+#+BEGIN_EXAMPLE 
+help - Get help
+delete - [admin only] Reply to a bot message to delete it
+top - Show users with most duplicated messages
+topics - Show most duplicated messages
+me - Show the number of duplicate messages I sent
+resettop - [admin only] Reset the top record for the current chat
+#+END_EXAMPLE
+
+
+** 获取代码
+
+#+BEGIN_SRC sh
+git clone https://github.com/yangsheng6810/no_dup_bot.git
+cd no_dup_bot # 假设这个文件夹在 <YOUR_PATH> 中
+#+END_SRC
+
+** 安装 Rust 与依赖
+
+#+BEGIN_SRC sh
+curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
+sudo apt-get update
+sudo apt install build-essential pkg-config libssl-dev
+#+END_SRC
+
+** 修改与编译 bot
+
+你需要修改 =main.rs= [[https://github.com/yangsheng6810/no_dup_bot/blob/master/src/main.rs#L26][第26行]] 的 =no_dup_bot= 为你自己 bot 的 username （以 =bot= 结尾的那个）。 
+
+#+BEGIN_SRC Rust
+static BOT_NAME: &str = "no_dup_bot";
+#+END_SRC
+
+使用你自己喜欢的编辑器修改完成后，开始编译 bot。
+
+#+BEGIN_SRC sh
+cargo check # 检查 bot 与其依赖
+cargo build --release
+cd <YOUR_PATH>/no_dup_bot/target/release
+#+END_SRC
+
+** 设置环境变量并启动 bot
+
+你可以在 [[https://t.me/BotFather][@BotFather]] 处获得 =<YOUR_BOT_TOKEN>= ，并在 [[https://t.me/userinfobot][@userinfobot]] 处获得 =<ADMIN_USER_ID>= 。
+
+#+BEGIN_SRC sh
+export TELOXIDE_TOKEN=<YOUR_BOT_TOKEN>
+export NO_DUP_BOT_ADMIN=<ADMIN_USER_ID>
+#+END_SRC
+
+最后，启动 bot 并立即开始火星救援吧！
+
+#+BEGIN_SRC sh
+cd <YOUR PATH>/no_dup_bot/target/release && ./no_dup_bot
+#+END_SRC
+
+
+* 使用
+
+在一个群组中，使用如下的命令格式与 bot 交互。
+
+#+BEGIN_EXAMPLE 
+/<COMMAND> @<YOUR_BOT_USERNAME>
+#+END_EXAMPLE
+
+例如，假设 bot 的 =username= 为 =no_dup_bot=，你可以在群组中使用如下的命令显示帮助：
+
+#+BEGIN_EXAMPLE 
+/help @no_dup_bot
+#+END_EXAMPLE
+
+你将会得到如下回复：
+
+#+BEGIN_EXAMPLE 
+These commands are supported:
+/help - Get help
+/delete - Reply to a bot message to delete it
+/top - Show users with most duplicated messages
+/topics - Show most duplicated messages
+/me - Show the number of duplicate messages I sent
+/resettop - Reset the top record for the current chat
+#+END_EXAMPLE
+
+当通过回复 bot 的消息来向 bot 发送命令时，无需在 =/<COMMAND>= 之后加上 =@<YOUR_BOT_USERNAME>= 。
+
+如果你已经在 =BotFather= 中设置了 bot 所支持的命令（参见[[#准备-bot][准备 bot]]），你只需要输入 =/= 即可借助 Telegram 的自动补全功能快速输入命令。
