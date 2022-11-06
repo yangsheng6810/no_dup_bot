@@ -24,9 +24,22 @@ The instructions below shows how to deploy your bot on a Ubuntu 20.04 LTS server
 
 First of all, you must have a Telegram bot. You can apply for one by talking with [[https://t.me/BotFather][@BotFather]]. See [[https://core.telegram.org/bots/features#creating-a-new-bot][official documentation]] for more information.
 
-The bot is supposed to be used in a group, so add the bot to a group before using. Then, check the following settings of the bot in =Bot Father - /mybots - @your_bot - Bot Settings=:
+The bot is supposed to be used in a group, so add the bot to a group before using. Then, check the following settings of the bot in =BotFather - /mybots - @your_bot - Bot Settings=:
  - Set =Allow Groups?= as =off= after adding your bot to your group. This will make sure only the users in your group can use the bot.
  - [[https://core.telegram.org/bots/features#privacy-mode][Group Privacy]] should be =disabled=. This will make sure your bot has access to the group messages.
+
+For convience, you can also set supported commands in [[https://t.me/BotFather][@BotFather]], so that Telegram will suggest a list of supported commands with descriptions to help the user enter commands quickly when the user enters a =/= in the group. 
+To set this, enter =/setcommands= in [[https://t.me/BotFather][@BotFather]], and choose your bot username. Copy the following texts and send them to =BotFather=, and the setting will be effective in several minutes.
+
+#+BEGIN_EXAMPLE 
+help - Get help
+delete - [admin only] Reply to a bot message to delete it
+top - Show users with most duplicated messages
+topics - Show most duplicated messages
+me - Show the number of duplicate messages I sent
+resettop - [admin only] Reset the top record for the current chat
+#+END_EXAMPLE
+
 
 ** Get the code
 
@@ -101,3 +114,7 @@ These commands are supported:
 /me - Show the number of duplicate messages I sent
 /resettop - Reset the top record for the current chat
 #+END_EXAMPLE
+
+When you send a command to the bot by replying to a bot's message, you only need to send =/<COMMAND>=. 
+
+If you already tell =BotFather= the commands supported by the bot (see [[#prepare-the-bot][Prepare the bot]]), you only need to enter a =/=, and Telegram will suggest all the available commands to help you enter the entire command quickly.

@@ -22,9 +22,21 @@
 
 要开始火星救援，你必须通过 [[https://t.me/BotFather][@BotFather]] 申请一个 Telegram bot。阅读[[https://core.telegram.org/bots/features#creating-a-new-bot][官方文档]]以获取更多信息。
 
-本 bot 设计为在群组中使用。将 bot 加入你的群组后，在 =Bot Father - /mybots - @your_bot - Bot Settings= 中检查 bot 的如下设置：
+本 bot 设计为在群组中使用。将 bot 加入你的群组后，在 =BotFather - /mybots - @your_bot - Bot Settings= 中检查 bot 的如下设置：
  - 在你已将 bot 加入你的群组的情况下，=Allow Groups?= 需设置为 =off=。这将避免你的 bot 被其他人滥用。
  - [[https://core.telegram.org/bots/features#privacy-mode][Group Privacy]] 需设置为 =disabled=。 这将保证 bot 有足够的权限访问群组内的消息。
+
+方便起见，你可以告诉 [[https://t.me/BotFather][@BotFather]] 此 bot 所支持的命令，这样当用户在群组中输入 =/= 时，Telegram 会提供命令的自动补全功能。
+只需进入 [[https://t.me/BotFather][@BotFather]] 后输入 =/setcommands=，再选择你 bot 的 username，最后复制下列文本并发送即可完成设置。设置会在几分钟后生效。
+
+#+BEGIN_EXAMPLE 
+help - Get help
+delete - [admin only] Reply to a bot message to delete it
+top - Show users with most duplicated messages
+topics - Show most duplicated messages
+me - Show the number of duplicate messages I sent
+resettop - [admin only] Reset the top record for the current chat
+#+END_EXAMPLE
 
 
 ** 获取代码
@@ -99,3 +111,7 @@ These commands are supported:
 /me - Show the number of duplicate messages I sent
 /resettop - Reset the top record for the current chat
 #+END_EXAMPLE
+
+当通过回复 bot 的消息来向 bot 发送命令时，无需在 =/<COMMAND>= 之后加上 =@<YOUR_BOT_USERNAME>= 。
+
+如果你已经在 =BotFather= 中设置了 bot 所支持的命令（参见[[#准备-bot][准备 bot]]），你只需要输入 =/= 即可借助 Telegram 的自动补全功能快速输入命令。
