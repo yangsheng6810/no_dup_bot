@@ -14,6 +14,58 @@
 
   当一条消息被转发到当前群组时，我们获取一个指向原频道中该消息的链接。之前看到的链接作为 key 存在一个 KV store 里，其值包括看到的次数。如果新消息的链接在 KV store 中可以找到，那么说明我们见过这条消息，应该增加计数，并且把之前转发消息的链接拍在他脸上。如果没看见，就默默记下来，次数为 1。URL 链接的处理与之类似。
 
-* 计划
-- 支持对重复出现的图片做出反应。有人说 Telegram 里存储的图片是有唯一 ID 的，大概可以用
-- 使用 ~/delete~ 回复 Bot 的一条消息时，删除被回复的消息。目前实现存在一些技术障碍
+* 部署
+
+如下是一个将 bot 部署在一台 Ubuntu 20.04 LTS 的例子。
+
+** 获取代码
+
+#+BEGIN_SRC sh
+git clone https://github.com/yangsheng6810/no_dup_bot.git
+cd no_dup_bot # 假设这个文件夹在 <YOUR_PATH> 中
+#+END_SRC
+
+** 安装 Rust 与依赖
+
+#+BEGIN_SRC sh
+curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
+sudo apt-get update
+sudo apt install build-essential pkg-config libssl-dev
+#+END_SRC
+
+** 修改与编译 bot
+
+你需要修改 =main.rs= [[https://github.com/yangsheng6810/no_dup_bot/blob/master/src/main.rs#L26][第26行]] 的 =no_dup_bot= 为你自己 bot 的 username （必须以 =bot= 结尾的那个）。 
+
+#+BEGIN_SRC Rust
+static BOT_NAME: &str = "no_dup_bot";
+#+END_SRC
+
+使用你自己喜欢的编辑器修改完成后，开始编译 bot。
+
+#+BEGIN_SRC sh
+cargo check # 检查 bot 与其依赖
+cargo build --release
+cd <YOUR_PATH>/no_dup_bot/target/release
+#+END_SRC
+
+** 设置环境变量并启动 bot
+
+你可以在 [[https://t.me/BotFather][@BotFather]] 处获得 =<YOUR_BOT_TOKEN>= ，并在 [[https://t.me/userinfobot][@userinfobot]] 处获得 =<ADMIN_USER_ID>=.
+
+#+BEGIN_SRC sh
+export TELOXIDE_TOKEN=<YOUR_BOT_TOKEN>
+export NO_DUP_BOT_ADMIN=<ADMIN_USER_ID>
+#+END_SRC
+
+你可以将上面两行加入 =.bashrc= 来避免每次运行 bot 时都设置一次环境变量。要使 =.bashrc= 的改动立即生效，可以运行下面的命令：
+
+#+BEGIN_SRC sh
+cd ~ && source .bashrc
+#+END_SRC
+
+最后，启动 bot 并立即开始火星救援吧！
+
+#+BEGIN_SRC sh
+cd <YOUR PATH>/no_dup_bot/target/release && ./no_dup_bot
+#+END_SRC
