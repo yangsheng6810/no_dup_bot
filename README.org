@@ -22,9 +22,9 @@ The instructions below shows how to deploy your bot on a Ubuntu 20.04 LTS server
 
 ** Prepare the bot
 
-First of all, you must have a Telegram bot. You can apply one by talking with [[https://t.me/BotFather][@BotFather]]. See [[https://core.telegram.org/bots/features#creating-a-new-bot][official documentation]] for more information.
+First of all, you must have a Telegram bot. You can apply for one by talking with [[https://t.me/BotFather][@BotFather]]. See [[https://core.telegram.org/bots/features#creating-a-new-bot][official documentation]] for more information.
 
-The bot must be used in a group, so add the bot to a group before using. Then, check the following settings of the bot in =Bot Father - /mybots - @your_bot - Bot Settings=:
+The bot is supposed to be used in a group, so add the bot to a group before using. Then, check the following settings of the bot in =Bot Father - /mybots - @your_bot - Bot Settings=:
  - Set =Allow Groups?= as =off= after adding your bot to your group. This will make sure only the users in your group can use the bot.
  - [[https://core.telegram.org/bots/features#privacy-mode][Group Privacy]] should be =disabled=. This will make sure your bot has access to the group messages.
 
@@ -78,7 +78,7 @@ cd <YOUR PATH>/no_dup_bot/target/release && ./no_dup_bot
 
 * Usage
 
-Using the following command format in a group to interact with the bot.
+Use the following command format in a group to interact with the bot.
 
 #+BEGIN_EXAMPLE 
 /<COMMAND> @<YOUR_BOT_USERNAME>

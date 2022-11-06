@@ -22,7 +22,7 @@
 
 要开始火星救援，你必须通过 [[https://t.me/BotFather][@BotFather]] 申请一个 Telegram bot。阅读[[https://core.telegram.org/bots/features#creating-a-new-bot][官方文档]]以获取更多信息。
 
-本 bot 必须在群组中使用。将 bot 加入你的群组后，在 =Bot Father - /mybots - @your_bot - Bot Settings= 中检查 bot 的如下设置：
+本 bot 设计为在群组中使用。将 bot 加入你的群组后，在 =Bot Father - /mybots - @your_bot - Bot Settings= 中检查 bot 的如下设置：
  - 在你已将 bot 加入你的群组的情况下，=Allow Groups?= 需设置为 =off=。这将避免你的 bot 被其他人滥用。
  - [[https://core.telegram.org/bots/features#privacy-mode][Group Privacy]] 需设置为 =disabled=。 这将保证 bot 有足够的权限访问群组内的消息。
 
