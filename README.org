@@ -18,7 +18,15 @@ When a message is forwarded into the current group, we obtain a link to the orig
 
 * Deployment
 
-The instructions below shows how to deploy your bot on a Ubuntu 20.04 LTS.
+The instructions below shows how to deploy your bot on a Ubuntu 20.04 LTS server.
+
+** Prepare the bot
+
+First of all, you must have a Telegram bot. You can apply one by talking with [[https://t.me/BotFather][@BotFather]]. See [[https://core.telegram.org/bots/features#creating-a-new-bot][official documentation]] for more information.
+
+The bot must be used in a group, so add the bot to a group before using. Then, check the following settings of the bot in =Bot Father - /mybots - @your_bot - Bot Settings=:
+ - Set =Allow Groups?= as =off= after adding your bot to your group. This will make sure only the users in your group can use the bot.
+ - [[https://core.telegram.org/bots/features#privacy-mode][Group Privacy]] should be =disabled=. This will make sure your bot has access to the group messages.
 
 ** Get the code
 
@@ -61,14 +69,35 @@ export TELOXIDE_TOKEN=<YOUR_BOT_TOKEN>
 export NO_DUP_BOT_ADMIN=<ADMIN_USER_ID>
 #+END_SRC
 
-You can add the two lines above to =.bashrc= to avoid setting up the environment variables every time you run the bot. To make the change of =.bashrc= effective immediately, run
-
-#+BEGIN_SRC sh
-cd ~ && source .bashrc
-#+END_SRC
-
 Finally, start the bot and enjoy it!
 
 #+BEGIN_SRC sh
 cd <YOUR PATH>/no_dup_bot/target/release && ./no_dup_bot
 #+END_SRC
+
+
+* Usage
+
+Using the following command format in a group to interact with the bot.
+
+#+BEGIN_EXAMPLE 
+/<COMMAND> @<YOUR_BOT_USERNAME>
+#+END_EXAMPLE
+
+For example, assume that your bot username is =no_dup_bot=, then you can use the following command in a group to show the help messages.
+
+#+BEGIN_EXAMPLE 
+/help @no_dup_bot
+#+END_EXAMPLE
+
+You will see the following reply:
+
+#+BEGIN_EXAMPLE 
+These commands are supported:
+/help - Get help
+/delete - Reply to a bot message to delete it
+/top - Show users with most duplicated messages
+/topics - Show most duplicated messages
+/me - Show the number of duplicate messages I sent
+/resettop - Reset the top record for the current chat
+#+END_EXAMPLE

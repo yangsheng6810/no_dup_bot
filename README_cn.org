@@ -1,13 +1,13 @@
 #+TITLE: 火星 Bot
-一个 Telegram Bot，在群里反复收到群友转发同一个频道消息时提醒他火星了，并且把之前转发消息的链接拍在他脸上。 [[README.org][English Readme]]
+一个 Telegram bot，在群里反复收到群友转发同一个频道消息时提醒他火星了，并且把之前转发消息的链接拍在他脸上。 [[README.org][English Readme]]
 
 * 设计
-本 Bot 设计对下述转发做出反应：
+本 bot 设计对下述转发做出反应：
 - 整条消息都是一个 URL
 - 消息转发自一个 *公开频道*
 
 
-本 Bot 不对下述转发做出反应：
+本 bot 不对下述转发做出反应：
 - 消息转发自其他群
 - 消息转发自 *本群* 。避免群友“转发复读机”
 - 消息转发自 *私有频道*
@@ -16,7 +16,16 @@
 
 * 部署
 
-如下是一个将 bot 部署在一台 Ubuntu 20.04 LTS 的例子。
+如下是一个将本 bot 部署在一台 Ubuntu 20.04 LTS 服务器的例子。
+
+** 准备 bot
+
+要开始火星救援，你必须通过 [[https://t.me/BotFather][@BotFather]] 申请一个 Telegram bot。阅读[[https://core.telegram.org/bots/features#creating-a-new-bot][官方文档]]以获取更多信息。
+
+本 bot 必须在群组中使用。将 bot 加入你的群组后，在 =Bot Father - /mybots - @your_bot - Bot Settings= 中检查 bot 的如下设置：
+ - 在你已将 bot 加入你的群组的情况下，=Allow Groups?= 需设置为 =off=。这将避免你的 bot 被其他人滥用。
+ - [[https://core.telegram.org/bots/features#privacy-mode][Group Privacy]] 需设置为 =disabled=。 这将保证 bot 有足够的权限访问群组内的消息。
+
 
 ** 获取代码
 
@@ -35,7 +44,7 @@ sudo apt install build-essential pkg-config libssl-dev
 
 ** 修改与编译 bot
 
-你需要修改 =main.rs= [[https://github.com/yangsheng6810/no_dup_bot/blob/master/src/main.rs#L26][第26行]] 的 =no_dup_bot= 为你自己 bot 的 username （必须以 =bot= 结尾的那个）。 
+你需要修改 =main.rs= [[https://github.com/yangsheng6810/no_dup_bot/blob/master/src/main.rs#L26][第26行]] 的 =no_dup_bot= 为你自己 bot 的 username （以 =bot= 结尾的那个）。 
 
 #+BEGIN_SRC Rust
 static BOT_NAME: &str = "no_dup_bot";
@@ -51,17 +60,11 @@ cd <YOUR_PATH>/no_dup_bot/target/release
 
 ** 设置环境变量并启动 bot
 
-你可以在 [[https://t.me/BotFather][@BotFather]] 处获得 =<YOUR_BOT_TOKEN>= ，并在 [[https://t.me/userinfobot][@userinfobot]] 处获得 =<ADMIN_USER_ID>=.
+你可以在 [[https://t.me/BotFather][@BotFather]] 处获得 =<YOUR_BOT_TOKEN>= ，并在 [[https://t.me/userinfobot][@userinfobot]] 处获得 =<ADMIN_USER_ID>= 。
 
 #+BEGIN_SRC sh
 export TELOXIDE_TOKEN=<YOUR_BOT_TOKEN>
 export NO_DUP_BOT_ADMIN=<ADMIN_USER_ID>
-#+END_SRC
-
-你可以将上面两行加入 =.bashrc= 来避免每次运行 bot 时都设置一次环境变量。要使 =.bashrc= 的改动立即生效，可以运行下面的命令：
-
-#+BEGIN_SRC sh
-cd ~ && source .bashrc
 #+END_SRC
 
 最后，启动 bot 并立即开始火星救援吧！
@@ -69,3 +72,30 @@ cd ~ && source .bashrc
 #+BEGIN_SRC sh
 cd <YOUR PATH>/no_dup_bot/target/release && ./no_dup_bot
 #+END_SRC
+
+
+* 使用
+
+在一个群组中，使用如下的命令格式与 bot 交互。
+
+#+BEGIN_EXAMPLE 
+/<COMMAND> @<YOUR_BOT_USERNAME>
+#+END_EXAMPLE
+
+例如，假设 bot 的 =username= 为 =no_dup_bot=，你可以在群组中使用如下的命令显示帮助：
+
+#+BEGIN_EXAMPLE 
+/help @no_dup_bot
+#+END_EXAMPLE
+
+你将会得到如下回复：
+
+#+BEGIN_EXAMPLE 
+These commands are supported:
+/help - Get help
+/delete - Reply to a bot message to delete it
+/top - Show users with most duplicated messages
+/topics - Show most duplicated messages
+/me - Show the number of duplicate messages I sent
+/resettop - Reset the top record for the current chat
+#+END_EXAMPLE
