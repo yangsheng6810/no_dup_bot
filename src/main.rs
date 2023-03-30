@@ -20,12 +20,12 @@ use std::collections::HashSet;
 
 use std::env;
 use once_cell::sync::OnceCell;
-use tracing::{debug, debug_span, info, span, warn, trace, Level, Instrument};
+use tracing::{debug, info, span, warn, trace, Level, Instrument};
 use tracing_subscriber;
 
-static BOT_NAME: &str = "no_dup_bot";
+static BOT_NAME: OnceCell<String> = OnceCell::new();
 static ADMIN: OnceCell<HashSet<i64>> = OnceCell::new();
-static TIME_OUT_DAYS: i64 = 10;
+static TIME_OUT_DAYS: OnceCell<i64> = OnceCell::new();
 
 
 #[derive(BotCommand, Debug)]
@@ -33,7 +33,7 @@ static TIME_OUT_DAYS: i64 = 10;
 enum Command {
     #[command(description = "Get help")]
     Help,
-    #[command(description = "Reply to a bot message to delete it")]
+    #[command(description = "[admin only] Reply to a bot message to delete it")]
     Delete,
     #[command(description = "Show users with most duplicated messages")]
     Top,
@@ -41,7 +41,7 @@ enum Command {
     Topics,
     #[command(description = "Show the number of duplicate messages I sent")]
     Me,
-    #[command(description = "Reset the top record for the current chat")]
+    #[command(description = "[admin only] Reset the top record for the current chat")]
     ResetTop,
 }
 
@@ -102,7 +102,7 @@ fn reply_to_bot(cx: &UpdateWithCx<AutoSend<Bot>, Message>) -> bool {
     if let Some(message) = cx.update.reply_to_message() {
         if let Some(usr) = message.from() {
             if let Some(username) = &usr.username {
-                if username.eq(BOT_NAME) {
+                if username.eq(BOT_NAME.get().unwrap()) {
                     return true
                 }
             }
@@ -118,7 +118,7 @@ async fn delete_replied_msg(cx: &UpdateWithCx<AutoSend<Bot>, Message>)
         Some(message) => {
             if let Some(usr) = message.from() {
                 if let Some(username) = &usr.username {
-                    if username.eq(BOT_NAME) {
+                    if username.eq(BOT_NAME.get().unwrap()) {
                         info!("Start deleting message");
                         if allows_delete(cx) {
                             cx.requester
@@ -462,7 +462,7 @@ async fn check_img_hash(img_db: &Arc<Mutex<sled::Db>>, hash: &str, chat_id: &str
     let img_db = img_db.lock().await;
 
     let now = Utc::now();
-    let time_out_time = now.checked_sub_signed(Duration::days(TIME_OUT_DAYS)).unwrap();
+    let time_out_time = now.checked_sub_signed(Duration::days(*TIME_OUT_DAYS.get().unwrap())).unwrap();
     let dry_run = false;
 
     let mut best_hash: Option<ImageHash> = None;
@@ -860,7 +860,7 @@ async fn cleanup_img_db(img_db: &Arc<Mutex<sled::Db>>, chat_id: &str) -> Result<
     let img_db = img_db.lock().await;
     let mut count = 0;
     let now = Utc::now();
-    if let Some(time_out_time) = now.checked_sub_signed(Duration::days(TIME_OUT_DAYS)) {
+    if let Some(time_out_time) = now.checked_sub_signed(Duration::days(*TIME_OUT_DAYS.get().unwrap())) {
         for ans in img_db.iter() {
             ans.ok().map(
                 |(key, value)| {
@@ -893,7 +893,7 @@ async fn cleanup_img_db(img_db: &Arc<Mutex<sled::Db>>, chat_id: &str) -> Result<
                 });
         }
     } else {
-        warn!("Time parse failuer when cleaning up db!");
+        warn!("Time parse failed when cleaning up db!");
     }
     Ok(())
 }
@@ -1107,7 +1107,7 @@ fn need_handle(ctx: &UpdateWithCx<AutoSend<Bot>, Message>) -> bool {
 async fn handle_command(ctx: &UpdateWithCx<AutoSend<Bot>, Message>,
                         db: Arc<Mutex<MyDB>>,
                         top_db: Arc<Mutex<sled::Db>>) -> Result<bool, RequestError> {
-    let bot_name_str = BOT_NAME;
+    let bot_name_str = BOT_NAME.get().unwrap();
     if let Some(text) = ctx.update.text() {
         if let Ok(command) = Command::parse(text, bot_name_str) {
             // dbg!(&command);
@@ -1166,7 +1166,7 @@ async fn action(
 async fn run(db: Arc<Mutex<MyDB>>,
              img_db: Arc<Mutex<sled::Db>>,
              top_db: Arc<Mutex<sled::Db>>) {
-    info!("Starting simple_commands_bot...");
+    info!("Starting no_dup_bot...");
 
     let bot = Bot::from_env().auto_send();
 
@@ -1222,12 +1222,12 @@ async fn run(db: Arc<Mutex<MyDB>>,
 }
 
 fn get_env() {
-    let env_key = "NO_DUP_BOT_ADMIN";
+    let admin_env_key = "NO_DUP_BOT_ADMIN";
     let mut admin_db = HashSet::new();
-    let admin_str = match env::var_os(&env_key) {
+    let admin_str = match env::var_os(&admin_env_key) {
         Some(v) => v.into_string().unwrap(),
         None => {
-            warn!("${} is not set", &env_key);
+            warn!("${} is not set", &admin_env_key);
             String::from("0")
         }
     };
@@ -1240,6 +1240,26 @@ fn get_env() {
     }
     // only set once, so will never fail
     ADMIN.set(admin_db).unwrap();
+
+    let bot_name_env_key = "NO_DUP_BOT_NAME";
+    let bot_name_str = match env::var_os(&bot_name_env_key) {
+        Some(v) => v.into_string().unwrap(),
+        None => {
+            warn!("${} is set as no_dup_bot", &bot_name_env_key);
+            String::from("no_dup_bot")
+        }
+    };
+    BOT_NAME.set(bot_name_str).unwrap();
+
+    let time_out_env_key = "NO_DUP_BOT_TIME_OUT_DAYS";
+    let time_out_i64 = match env::var_os(&time_out_env_key) {
+        Some(v) => v.into_string().expect("10").parse::<i64>().unwrap(),
+        None => {
+            warn!("${} is set as 10", &time_out_env_key);
+            10i64
+        }
+    };
+    TIME_OUT_DAYS.set(time_out_i64).unwrap();
 }
 
 #[tokio::main]
