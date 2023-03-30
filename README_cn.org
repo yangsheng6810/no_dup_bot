@@ -39,13 +39,6 @@ resettop - [admin only] Reset the top record for the current chat
 #+END_EXAMPLE
 
 
-** 获取代码
-
-#+BEGIN_SRC sh
-git clone https://github.com/yangsheng6810/no_dup_bot.git
-cd no_dup_bot # 假设这个文件夹在 <YOUR_PATH> 中
-#+END_SRC
-
 ** 安装 Rust 与依赖
 
 #+BEGIN_SRC sh
@@ -54,35 +47,44 @@ sudo apt-get update
 sudo apt install build-essential pkg-config libssl-dev
 #+END_SRC
 
-** 修改与编译 bot
 
-你需要修改 =main.rs= [[https://github.com/yangsheng6810/no_dup_bot/blob/master/src/main.rs#L26][第26行]] 的 =no_dup_bot= 为你自己 bot 的 username （以 =bot= 结尾的那个）。 
-
-#+BEGIN_SRC Rust
-static BOT_NAME: &str = "no_dup_bot";
-#+END_SRC
-
-使用你自己喜欢的编辑器修改完成后，开始编译 bot。
+** 获取代码并编译 bot
 
 #+BEGIN_SRC sh
-cargo check # 检查 bot 与其依赖
+git clone https://github.com/yangsheng6810/no_dup_bot.git
+cd no_dup_bot # 假设这个文件夹在 <YOUR_PATH> 中
+
+cargo check # 检查 bot 代码与其依赖
 cargo build --release
 cd <YOUR_PATH>/no_dup_bot/target/release
 #+END_SRC
 
 ** 设置环境变量并启动 bot
 
-你可以在 [[https://t.me/BotFather][@BotFather]] 处获得 =<YOUR_BOT_TOKEN>= ，并在 [[https://t.me/userinfobot][@userinfobot]] 处获得 =<ADMIN_USER_ID>= 。
+复制 =nodupbot.service.example= 并重命名为 =nodupbot.service=。
 
 #+BEGIN_SRC sh
-export TELOXIDE_TOKEN=<YOUR_BOT_TOKEN>
-export NO_DUP_BOT_ADMIN=<ADMIN_USER_ID>
+cp nodupbot.service.example nodupbot.service
 #+END_SRC
+
+修改 =nodupbot.service= 的第 10 至第 15 行。你可以在 [[https://t.me/BotFather][@BotFather]] 处获得 =<YOUR_BOT_TOKEN>= ，并在 [[https://t.me/userinfobot][@userinfobot]] 处获得 =<ADMIN_USER_ID>= 。=YOUR_BOT_USERNAME= 是你在 =BotFather= 处设置，以 =bot= 结尾的 bot 用户名。
+
+#+BEGIN_EXAMPLE 
+Environment="TELOXIDE_TOKEN=<YOUR_BOT_TOKEN>"
+Environment="NO_DUP_BOT_ADMIN=<ADMIN_USER_ID>"
+Environment="NO_DUP_BOT_NAME=<YOUR_BOT_USERNAME>"
+Environment="NO_DUP_BOT_TIME_OUT_DAYS=10"
+ExecStart=<YOUR_PATH>/no_dup_bot/target/release/no_dup_bot
+WorkingDirectory=<YOUR_PATH>/no_dup_bot/target/release
+#+END_EXAMPLE
 
 最后，启动 bot 并立即开始火星救援吧！
 
 #+BEGIN_SRC sh
-cd <YOUR PATH>/no_dup_bot/target/release && ./no_dup_bot
+sudo mv nodupbot.service /etc/systemd/system
+sudo systemctl enable nodupbot # bot 将会随系统启动
+sudo systemctl start nodupbot
+sudo systemctl status nodupbot # 确认 bot 状态
 #+END_SRC
 
 
@@ -105,11 +107,11 @@ cd <YOUR PATH>/no_dup_bot/target/release && ./no_dup_bot
 #+BEGIN_EXAMPLE 
 These commands are supported:
 /help - Get help
-/delete - Reply to a bot message to delete it
+/delete - [admin only] Reply to a bot message to delete it
 /top - Show users with most duplicated messages
 /topics - Show most duplicated messages
 /me - Show the number of duplicate messages I sent
-/resettop - Reset the top record for the current chat
+/resettop - [admin only] Reset the top record for the current chat
 #+END_EXAMPLE
 
 当通过回复 bot 的消息来向 bot 发送命令时，无需在 =/<COMMAND>= 之后加上 =@<YOUR_BOT_USERNAME>= 。

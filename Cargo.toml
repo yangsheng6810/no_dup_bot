@@ -1,6 +1,6 @@
 [package]
 name = "no_dup_bot"
-version = "0.1.0"
+version = "0.1.1"
 authors = ["Sheng Yang <yangsheng6810@gmail.com>"]
 edition = "2018"
 

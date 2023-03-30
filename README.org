@@ -40,14 +40,6 @@ me - Show the number of duplicate messages I sent
 resettop - [admin only] Reset the top record for the current chat
 #+END_EXAMPLE
 
-
-** Get the code
-
-#+BEGIN_SRC sh
-git clone https://github.com/yangsheng6810/no_dup_bot.git
-cd no_dup_bot # Assume this folder is in <YOUR_PATH>.
-#+END_SRC
-
 ** Install Rust and dependencies
 
 #+BEGIN_SRC sh
@@ -57,35 +49,44 @@ sudo apt install build-essential pkg-config libssl-dev
 #+END_SRC
 
 
-** Modify & build the bot
-
-First, you need to modify =no_dup_bot= in [[https://github.com/yangsheng6810/no_dup_bot/blob/master/src/main.rs#L26][L26]] of =main.rs= to your own bot username (i.e., the one that ends with =bot=). 
-
-#+BEGIN_SRC Rust
-static BOT_NAME: &str = "no_dup_bot";
-#+END_SRC
-
-Then you can start to build the bot.
+** Get the code and build the bot
 
 #+BEGIN_SRC sh
+git clone https://github.com/yangsheng6810/no_dup_bot.git
+cd no_dup_bot # Assume this folder is in <YOUR_PATH>.
+
 cargo check # Check the bot package and all of its dependencies for errors.
 cargo build --release
-cd <YOUR_PATH>/no_dup_bot/target/release
+cd ./target/release
 #+END_SRC
 
-** Setup environment variables and start the bot
+** Setup the bot service
 
-Get =<YOUR_BOT_TOKEN>= from [[https://t.me/BotFather][@BotFather]], and get =<ADMIN_USER_ID>= from [[https://t.me/userinfobot][@userinfobot]].
+Make a copy of =nodupbot.service.example= and name it as =nodupbot.service=.
 
 #+BEGIN_SRC sh
-export TELOXIDE_TOKEN=<YOUR_BOT_TOKEN>
-export NO_DUP_BOT_ADMIN=<ADMIN_USER_ID>
+cp nodupbot.service.example nodupbot.service
 #+END_SRC
 
-Finally, start the bot and enjoy it!
+We need to modify the Line 10 - Line 15 of =nodupbot.service=. Get =<YOUR_BOT_TOKEN>= from [[https://t.me/BotFather][@BotFather]], and get =<ADMIN_USER_ID>= from [[https://t.me/userinfobot][@userinfobot]]. =YOUR_BOT_USERNAME= is the one you set in =BotFather= and ends with =bot=.
+
+#+BEGIN_EXAMPLE 
+Environment="TELOXIDE_TOKEN=<YOUR_BOT_TOKEN>"
+Environment="NO_DUP_BOT_ADMIN=<ADMIN_USER_ID>"
+Environment="NO_DUP_BOT_NAME=<YOUR_BOT_USERNAME>"
+Environment="NO_DUP_BOT_TIME_OUT_DAYS=10"
+ExecStart=<YOUR_PATH>/no_dup_bot/target/release/no_dup_bot
+WorkingDirectory=<YOUR_PATH>/no_dup_bot/target/release
+#+END_EXAMPLE
+
+
+Finally, enable and start the bot. Enjoy it!
 
 #+BEGIN_SRC sh
-cd <YOUR PATH>/no_dup_bot/target/release && ./no_dup_bot
+sudo mv nodupbot.service /etc/systemd/system
+sudo systemctl enable nodupbot # now your bot will start with the system
+sudo systemctl start nodupbot
+sudo systemctl status nodupbot # check your bot status
 #+END_SRC
 
 
@@ -108,11 +109,11 @@ You will see the following reply:
 #+BEGIN_EXAMPLE 
 These commands are supported:
 /help - Get help
-/delete - Reply to a bot message to delete it
+/delete - [admin only] Reply to a bot message to delete it
 /top - Show users with most duplicated messages
 /topics - Show most duplicated messages
 /me - Show the number of duplicate messages I sent
-/resettop - Reset the top record for the current chat
+/resettop - [admin only] Reset the top record for the current chat
 #+END_EXAMPLE
 
 When you send a command to the bot by replying to a bot's message, you only need to send =/<COMMAND>=. 
